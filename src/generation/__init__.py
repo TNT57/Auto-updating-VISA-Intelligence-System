@@ -1,0 +1,1 @@
+"""Generation modules — LLM client and prompt templates."""

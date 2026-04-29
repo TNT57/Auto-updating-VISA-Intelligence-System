@@ -1,0 +1,54 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (large/binary)
+data/raw/pdfs/*.pdf
+data/raw/html_snapshots/
+data/processed/
+data/archives/
+!data/raw/pdfs/.gitkeep
+!data/raw/html_snapshots/.gitkeep
+!data/processed/.gitkeep
+!data/archives/.gitkeep
+
+# Database
+database/vectorstore/
+database/*.db
+!database/.gitkeep
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

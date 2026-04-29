@@ -1,0 +1,1 @@
+"""Retrieval modules — embedding and semantic search."""

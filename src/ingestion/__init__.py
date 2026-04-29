@@ -1,0 +1,1 @@
+"""Data ingestion modules — PDF loading, text chunking, and vectorstore management."""
