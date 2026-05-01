@@ -15,6 +15,16 @@ from pydantic import Field
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
+# ---------------------------------------------------------------------------
+# Redirect ML framework caches into the project directory (not C: drive).
+# These are set *before* any ML library is imported so they take effect.
+# Values from .env take precedence; defaults land inside .cache/ at root.
+# ---------------------------------------------------------------------------
+_CACHE_DIR = BASE_DIR / ".cache"
+os.environ.setdefault("HF_HOME", str(_CACHE_DIR / "huggingface"))
+os.environ.setdefault("TORCH_HOME", str(_CACHE_DIR / "torch"))
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables / .env file."""
 

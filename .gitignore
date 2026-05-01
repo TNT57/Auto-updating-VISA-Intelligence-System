@@ -17,6 +17,9 @@ venv/
 .venv/
 env/
 
+# Local caches (keeps everything inside project, not on C: drive)
+.cache/
+
 # IDE
 .vscode/
 .idea/

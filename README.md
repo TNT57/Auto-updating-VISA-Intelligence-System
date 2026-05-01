@@ -1,305 +1,203 @@
-# 🛂 Auto-Updating 485 Visa Intelligence System
+# 🛂 Auto-Updating VISA Intelligence System
 
-> **Never miss a 485 visa policy change again.**
-
-An intelligent monitoring system that scrapes Australian immigration websites daily, detects policy changes, and provides an AI-powered Q&A chatbot with source citations using Retrieval-Augmented Generation (RAG).
+> A side project exploring **RAG (Retrieval-Augmented Generation)** to build an intelligent, self-updating knowledge base for Australian immigration policy — because government websites change constantly, and keeping track manually is painful.
 
 ---
 
-## 🎯 What It Does
+## What It Does
 
-| Feature | Status | Description |
-|---|---|---|
-| 💬 **RAG Chatbot** | ✅ Phase 1 | Ask questions about the 485 visa with cited sources |
-| 📊 **Change Detection** | 🔜 Phase 2 | Automatically detect policy changes from government websites |
-| 🔔 **Smart Alerts** | 🔜 Phase 3 | Discord/email notifications for critical changes |
-| 📈 **Dashboard** | 🔜 Phase 4 | System health monitoring and analytics |
+This system monitors the Australian Department of Home Affairs website for changes to visa policies (currently targeting the **485 Temporary Graduate visa**), automatically ingests updated documents into a vector database, and lets you chat with the latest policy information through an AI-powered interface.
 
----
+| Feature | How It Works |
+|---|---|
+| **PDF Ingestion & Chunking** | Extracts text from government PDFs using `pdfplumber`, splits into semantic chunks with `LangChain` |
+| **Vector Search (RAG)** | Embeds chunks with `SentenceTransformers`, stores in `ChromaDB`, retrieves relevant context for queries |
+| **AI-Powered Chat** | Uses `Groq` (Llama 3) to generate grounded answers based on retrieved document context |
+| **Web Scraping & Monitoring** | Scrapes the Home Affairs website on a schedule via `BeautifulSoup`, detects content changes |
+| **Change Detection** | Stores historical snapshots in `SQLite` and diffs them to flag policy updates |
+| **Alerts** | Sends notifications for detected changes via Discord webhooks |
+| **Dashboard** | `Streamlit` multi-page app with chat, change log, and alert configuration |
+| **Automated Pipeline** | GitHub Actions workflow runs daily scraping and re-ingestion |
 
-## 🏗️ System Architecture
+## Why This Project
+
+I built this to solve a real problem I faced — Australian visa rules update frequently and the changes are buried in long PDF documents. Instead of manually checking and re-reading, I wanted a system that:
+
+1. **Notifies me** when something changes
+2. **Lets me ask questions** about the current rules in plain English
+3. **Shows me exactly what changed** between versions
+
+It also served as a hands-on way to learn and apply RAG patterns, vector databases, and LLM integration end-to-end.
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                 STREAMLIT UI                         │
-│  💬 Chat  │  📊 Changes  │  🔔 Alerts  │  📈 Health │
-└──────────────────────┬──────────────────────────────┘
-                       ↕
-┌──────────────────────────────────────────────────────┐
-│              RAG QUERY ENGINE                        │
-│  Retriever (ChromaDB) → LLM (Groq) → Citations     │
-└──────────────────────┬──────────────────────────────┘
-                       ↕
-┌──────────────────────────────────────────────────────┐
-│           VECTOR DATABASE (ChromaDB)                 │
-│  Embeddings (all-MiniLM-L6-v2) + Metadata           │
-└──────────────────────┬──────────────────────────────┘
-                       ↕
-┌──────────────────────────────────────────────────────┐
-│          DATA PIPELINE (Phase 2)                     │
-│  Scraper → Diff Detector → Ingestion → Alerts       │
-└──────────────────────┬──────────────────────────────┘
-                       ↕
-┌──────────────────────────────────────────────────────┐
-│          DATA SOURCES                                │
-│  homeaffairs.gov.au PDFs + Web Pages                │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Streamlit Dashboard                    │
+│         ┌──────────┬──────────┬───────────┐             │
+│         │   Chat   │ Changes  │  Alerts   │             │
+│         └────┬─────┴────┬─────┴─────┬─────┘             │
+└──────────────┼──────────┼───────────┼───────────────────┘
+               │          │           │
+       ┌───────▼──┐  ┌────▼────┐  ┌──▼──────────┐
+       │   RAG    │  │ Change  │  │   Alert     │
+       │ Pipeline │  │ Detector│  │  Manager    │
+       └────┬─────┘  └────┬────┘  └─────────────┘
+            │             │
+    ┌───────▼─────┐  ┌────▼────────┐
+    │  ChromaDB   │  │   SQLite    │
+    │  (Vectors)  │  │ (Snapshots) │
+    └──────▲──────┘  └────▲────────┘
+           │              │
+    ┌──────▼──────────────▼──────┐
+    │     Ingestion Pipeline     │
+    │  PDF Load → Chunk → Embed  │
+    └──────────────▲─────────────┘
+                   │
+         ┌─────────▼──────────┐
+         │   Web Scraper      │──── GitHub Actions (daily)
+         │   (Home Affairs)   │
+         └────────────────────┘
 ```
 
----
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical breakdown.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-### Core RAG Pipeline
-| Component | Technology | Purpose |
-|---|---|---|
-| **LLM** | Groq (Llama 3.3 70B) | Answer generation (free, instant) |
-| **Embeddings** | Sentence-Transformers (all-MiniLM-L6-v2) | Local vector embeddings |
-| **Vector DB** | ChromaDB | Persistent vector storage |
-| **PDF Parsing** | pdfplumber | Text extraction with tables |
-| **Framework** | LangChain | Text chunking & orchestration |
+| Category | Tools |
+|---|---|
+| **LLM & RAG** | LangChain, Groq (Llama 3), SentenceTransformers |
+| **Vector DB** | ChromaDB |
+| **Data Processing** | pdfplumber, pypdf, BeautifulSoup4, pandas |
+| **Backend** | Python, SQLAlchemy, APScheduler |
+| **Frontend** | Streamlit (multi-page), Plotly |
+| **Database** | SQLite |
+| **CI/CD** | GitHub Actions |
+| **Alerts** | Discord Webhooks |
 
-### Application
-| Component | Technology | Purpose |
-|---|---|---|
-| **UI** | Streamlit | Multi-page web application |
-| **Database** | SQLite + SQLAlchemy | Change tracking |
-| **Logging** | Loguru | Structured logging |
-| **Config** | Pydantic + python-dotenv | Settings management |
-
-### Automation (Phase 2+)
-| Component | Technology | Purpose |
-|---|---|---|
-| **Scraping** | httpx + BeautifulSoup | Government website monitoring |
-| **Scheduling** | GitHub Actions (cron) | Daily automated updates |
-| **Alerts** | Discord Webhooks | Instant notifications |
-| **Retries** | Tenacity | Robust error handling |
-
----
-
-## 📁 Project Structure
-
-```
-visa-485-intelligence/
-├── app/                          # Streamlit web application
-│   ├── streamlit_app.py          # Main entry point
-│   └── pages/                    # Multi-page app
-│       ├── 1_💬_Chat.py          # RAG Q&A interface
-│       ├── 2_📊_Changes.py       # Change timeline (Phase 2)
-│       └── 3_🔔_Alerts.py        # Alert config (Phase 3)
-│
-├── src/                          # Core source code
-│   ├── ingestion/                # PDF loading, chunking, vectorstore
-│   │   ├── pdf_loader.py         # PDF text extraction with metadata
-│   │   ├── text_chunker.py       # Recursive text splitting
-│   │   └── vectorstore_manager.py # ChromaDB management
-│   ├── retrieval/                # Semantic search
-│   │   └── retriever.py          # Query engine with relevance scoring
-│   ├── generation/               # LLM integration
-│   │   ├── llm_client.py         # Groq/OpenAI client with streaming
-│   │   └── prompt_templates.py   # Engineered prompts with citations
-│   ├── scraping/                 # Web scraping (Phase 2)
-│   ├── monitoring/               # Change detection (Phase 2)
-│   ├── alerts/                   # Notifications (Phase 3)
-│   ├── temporal/                 # Version control (Phase 3)
-│   └── utils/                    # Shared utilities
-│       ├── config.py             # Pydantic settings
-│       ├── logger.py             # Loguru configuration
-│       └── db_manager.py         # SQLAlchemy database
-│
-├── scripts/                      # Operational scripts
-│   └── initial_setup.py          # First-time setup wizard
-│
-├── data/                         # Data storage (gitignored)
-│   └── raw/pdfs/                 # Place 485 visa PDFs here
-│
-├── database/                     # Database storage (gitignored)
-│   └── changes.db                # SQLite change tracking
-│
-├── .github/workflows/            # GitHub Actions
-│   └── daily_scrape.yml          # Daily automation (Phase 2)
-│
-├── .env.example                  # Environment template
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
-
----
-
-## 🚀 Quick Start
+## Getting Started
 
 ### Prerequisites
-- Python 3.11+
-- [Groq API key](https://console.groq.com/keys) (free)
 
-### 1. Clone & Install
+- Python 3.10+
+- A free [Groq API key](https://console.groq.com/keys) (for LLM-powered chat)
+- Australian visa PDF documents (see step 4)
+
+### Setup
+
+> **⚠️ Always use the virtual environment!** This keeps all dependencies and caches
+> inside the project folder on your current drive. Never run bare `pip install` — it
+> pollutes your system Python (typically on C: drive) with gigabytes of packages.
 
 ```bash
+# 1. Clone the repo
 git clone https://github.com/TNT57/Auto-updating-VISA-Intelligence-System.git
 cd Auto-updating-VISA-Intelligence-System
 
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
+# 2. Create a virtual environment (keeps packages isolated in this project)
+python -m venv .venv
 
+# 3. Activate the virtual environment
+#    Windows CMD:
+.venv\Scripts\activate
+#    Windows PowerShell:
+.venv\Scripts\Activate.ps1
+#    macOS / Linux:
+#    source .venv/bin/activate
+
+# 4. Install dependencies (INTO the venv, not global)
 pip install -r requirements.txt
-```
 
-### 2. Configure
-
-```bash
+# 5. Configure your API key
 cp .env.example .env
 # Edit .env and add your GROQ_API_KEY
-```
 
-### 3. Add Documents
+# 6. Add visa PDF documents
+# Download from: https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485
+# Place them in: data/raw/pdfs/
 
-Download 485 visa PDFs from [immi.homeaffairs.gov.au](https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485) and place them in `data/raw/pdfs/`.
-
-### 4. Initialize
-
-```bash
+# 7. Run the setup script (creates directories, builds vector DB, runs test query)
 python scripts/initial_setup.py
-```
 
-### 5. Run
-
-```bash
+# 8. Launch the dashboard
 streamlit run app/streamlit_app.py
 ```
 
-Open `http://localhost:8501` and start asking questions! 🎉
+### Where Files Live (Cache & Storage)
 
----
+This project is designed to keep **everything** inside its own directory — no stray
+files on your C: drive.
 
-## 💡 Key Technical Decisions
-
-### Why Groq (not OpenAI)?
-- **Free tier** with generous limits
-- **Instant inference** — Llama 3.3 70B runs at ~500 tokens/sec
-- Easy swap to OpenAI via abstraction layer (change one env variable)
-
-### Why ChromaDB (not Pinecone/Weaviate)?
-- **Fully local** — no API costs or network latency
-- **Persistent** — data survives restarts
-- **Simple** — perfect for single-user portfolio project
-
-### Why all-MiniLM-L6-v2 (not OpenAI embeddings)?
-- **Runs locally** — no API costs
-- **80MB model** — fast to download and load
-- **Good quality** — fine for domain-specific RAG
-
-### Why pdfplumber (not PyPDF2)?
-- PyPDF2 is **deprecated**
-- pdfplumber handles **tables** beautifully (common in visa docs)
-- Better text extraction quality overall
-
----
-
-## 🧠 How the RAG Pipeline Works
-
-```
-User Question
-     │
-     ▼
-┌─────────────┐     ┌──────────────────┐
-│   Embed      │────▶│  ChromaDB        │
-│   Question   │     │  Similarity      │
-└─────────────┘     │  Search           │
-                    └────────┬─────────┘
-                             │ Top 5 chunks
-                             ▼
-                    ┌──────────────────┐
-                    │  Context +       │
-                    │  Question → LLM  │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │  Answer with     │
-                    │  Source Citations│
-                    └──────────────────┘
-```
-
-1. **User asks** a question in natural language
-2. **Question is embedded** using the same model as documents
-3. **ChromaDB finds** the 5 most similar document chunks
-4. **Chunks + question** are sent to the LLM with a carefully engineered prompt
-5. **LLM generates** an answer with source citations (document name + page number)
-6. **Answer displayed** in Streamlit with expandable source references
-
----
-
-## 🔮 Roadmap
-
-### Phase 2 — Auto-Update System (Weeks 3-4)
-- [ ] Web scraper for `immi.homeaffairs.gov.au`
-- [ ] Daily automated scraping via GitHub Actions
-- [ ] Change detection with diff algorithm
-- [ ] Severity classification (Critical/Important/Minor)
-
-### Phase 3 — Intelligence Layer (Weeks 5-6)
-- [ ] Temporal RAG — query across time ("What changed since January?")
-- [ ] Discord webhook alerts for critical changes
-- [ ] Email digest (daily/weekly)
-- [ ] "What's new this week?" AI summaries
-
-### Phase 4 — Production Polish (Weeks 7-8)
-- [ ] Comprehensive error handling & retry logic
-- [ ] Health monitoring dashboard
-- [ ] Rate limiting (respect government servers)
-- [ ] Deployment to Streamlit Community Cloud
-- [ ] Demo video and blog post
-
----
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Test specific module
-pytest tests/test_ingestion.py -v
-```
-
----
-
-## 📊 Deployment Strategy ($0/month)
-
-| Component | Platform | Cost |
+| What | Location | Notes |
 |---|---|---|
-| **Streamlit UI** | Streamlit Community Cloud | Free |
-| **Daily Scraping** | GitHub Actions (cron) | Free |
-| **Vector DB** | Persistent local storage | Free |
-| **LLM** | Groq free tier | Free |
-| **Alerts** | Discord webhooks | Free |
+| Python packages | `.venv/` | Virtual environment (gitignored) |
+| HuggingFace models | `.cache/huggingface/` | Embedding models cached here (gitignored) |
+| PyTorch data | `.cache/torch/` | Torch hub cache (gitignored) |
+| ChromaDB vectors | `database/vectorstore/` | Persistent vector DB (gitignored) |
+| Raw PDFs / HTML | `data/raw/` | Your documents (gitignored) |
+
+Cache directories are configured in two places so they always point inside the project:
+1. **`.env`** — `HF_HOME` and `TORCH_HOME` environment variables
+2. **`src/utils/config.py`** — programmatic fallback via `os.environ.setdefault()`
+
+### Project Status
+
+| Component | Status |
+|---|---|
+| PDF ingestion & chunking | ✅ Working |
+| Vector store (ChromaDB) | ✅ Working |
+| RAG retrieval pipeline | ✅ Working |
+| LLM chat (Groq) | ✅ Working |
+| Streamlit dashboard | ✅ Working |
+| Web scraper | ✅ Working |
+| Change detection | ✅ Working |
+| Alert system (Discord) | ✅ Working |
+| GitHub Actions daily scrape | ✅ Configured |
+
+The system is **fully functional**. To test it yourself, you'll need to:
+1. Add a `GROQ_API_KEY` to your `.env` file (free at [console.groq.com](https://console.groq.com/keys))
+2. Place at least one PDF document in `data/raw/pdfs/`
+3. Run `python scripts/initial_setup.py` to build the vector database
+4. Launch with `streamlit run app/streamlit_app.py`
+
+## Project Structure
+
+```
+├── app/                        # Streamlit dashboard
+│   ├── streamlit_app.py        # Main entry point & sidebar
+│   └── pages/
+│       ├── 1_Chat.py           # RAG-powered Q&A
+│       ├── 2_Changes.py        # Change detection timeline
+│       └── 3_Alerts.py         # Alert configuration
+├── src/
+│   ├── ingestion/              # PDF loading, chunking, vector store
+│   ├── retrieval/              # Semantic search & retrieval
+│   ├── generation/             # LLM client & prompt templates
+│   ├── scraping/               # Home Affairs web scraper
+│   ├── monitoring/             # Change detection engine
+│   ├── alerts/                 # Notification manager
+│   └── utils/                  # Config, logging, database
+├── scripts/
+│   └── initial_setup.py        # First-time project setup
+├── .github/workflows/
+│   └── daily_scrape.yml        # Automated daily scraping
+├── docs/
+│   └── ARCHITECTURE.md         # Detailed architecture docs
+└── tests/                      # Unit tests
+```
+
+## What I Learned
+
+- Building an end-to-end RAG pipeline — from raw PDFs to grounded AI answers
+- Trade-offs in chunking strategies and embedding models for document retrieval
+- Web scraping with change detection and snapshot diffing
+- Using free-tier LLM APIs (Groq) for production-quality inference
+- Scheduling automated data pipelines with GitHub Actions
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## ⚠️ Disclaimer
-
-This system is for **informational purposes only**. It is NOT legal advice. Always consult a **registered migration agent** (MARA) for your specific visa situation. The AI may occasionally produce inaccurate information — always verify against official sources.
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## 🙏 Acknowledgements
-
-- **Data source**: [Australian Department of Home Affairs](https://immi.homeaffairs.gov.au)
-- **LLM**: [Groq](https://groq.com) — free, fast inference
-- **Embeddings**: [Sentence-Transformers](https://www.sbert.net)
-- **Vector DB**: [ChromaDB](https://www.trychroma.com)
-- **UI**: [Streamlit](https://streamlit.io)
-
----
-
-Built with ❤️ for international students in Australia.
+*Built as a personal side project to explore RAG systems and automated intelligence gathering.*
