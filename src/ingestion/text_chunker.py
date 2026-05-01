@@ -6,7 +6,7 @@ suitable for embedding and retrieval. Preserves metadata
 for source citation in RAG responses.
 """
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 
 from src.ingestion.pdf_loader import DocumentChunk

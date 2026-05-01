@@ -1,8 +1,8 @@
 """
 Prompt templates for the RAG generation pipeline.
 
-Carefully engineered prompts that enforce source citation,
-accurate information, and proper disclaimers.
+Carefully engineered prompts that enforce accurate information,
+proper disclaimers, and clean answers (source citations are shown in the UI).
 """
 
 # System prompt — sets behavior and constraints
@@ -12,8 +12,7 @@ specifically the Subclass 485 Temporary Graduate visa.
 Your role is to provide accurate, helpful answers based ONLY on the provided context documents. \
 You must follow these rules strictly:
 
-1. **Cite your sources**: Always reference which document and page number your answer comes from.
-   Example: "According to [document_name.pdf, Page 3]..."
+1. **Do NOT include inline citations**: Do not write things like "According to [document_name.pdf, Page 3]" or "Source: [file.pdf, Page 1]". Source citations are handled separately in the UI. Just provide clear, direct answers.
 
 2. **Only use provided context**: Never use external knowledge. If the context doesn't contain \
 enough information to answer, say so clearly.
@@ -35,7 +34,7 @@ politely redirect.
 RAG_PROMPT_TEMPLATE = """Based on the following context documents about the Australian \
 Subclass 485 Temporary Graduate visa, please answer the user's question.
 
-Remember to cite your sources and include the disclaimer.
+Remember to include the disclaimer. Do NOT include inline source citations — they are shown separately in the UI.
 
 --- CONTEXT DOCUMENTS ---
 
@@ -60,7 +59,7 @@ New context documents:
 User's follow-up question: {question}
 
 Provide a helpful answer that considers the conversation history and the new context. \
-Cite your sources and include the disclaimer."""
+Include the disclaimer. Do NOT include inline source citations — they are shown separately in the UI."""
 
 # Change explanation prompt (Phase 2)
 CHANGE_EXPLANATION_TEMPLATE = """A change has been detected in 485 visa policy documents. \
@@ -93,3 +92,41 @@ Provide:
 3. Recommended actions for visa applicants
 
 Summary:"""
+
+# Grounding verification prompt (Improvement #1)
+GROUNDING_PROMPT = """You are a fact-checking assistant. Your job is to verify whether an AI-generated \
+answer is actually supported by the provided context documents.
+
+Context documents:
+{context}
+
+AI-generated answer:
+{answer}
+
+Respond with EXACTLY one of:
+- GROUNDED: The answer is fully supported by the context.
+- PARTIALLY_GROUNDED: Some claims are supported but others are not.
+- UNGROUNDED: The answer contains significant claims not found in the context.
+
+Then in one short sentence, explain your rating.
+
+Verdict:"""
+
+# LLM-based severity classification prompt (Improvement #5)
+SEVERITY_CLASSIFICATION_PROMPT = """You are an immigration policy analyst. Classify the severity of this \
+change to Australian 485 visa policy.
+
+Changed text:
+{changed_text}
+
+Summary of the change:
+{change_summary}
+
+Respond with EXACTLY one word — CRITICAL, IMPORTANT, or MINOR — followed by a one-sentence reason.
+
+Guidelines:
+- CRITICAL: Changes to eligibility, processing times, visa validity, work/study rights, mandatory requirements
+- IMPORTANT: Changes to fees, forms, documents, English requirements, health insurance, application process
+- MINOR: Formatting, contact details, minor wording, cosmetic changes
+
+Classification:"""

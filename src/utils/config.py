@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # ---- Embedding Model ----
     embedding_model: str = Field(
-        default="all-MiniLM-L6-v2", alias="EMBEDDING_MODEL"
+        default="all-mpnet-base-v2", alias="EMBEDDING_MODEL"
     )
 
     # ---- Discord Alerts (Phase 3) ----
@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     user_agent: str = Field(
         default="Visa485IntelligenceBot/1.0 (Educational Project)",
         alias="USER_AGENT",
+    )
+
+    # ---- Monitored URLs ----
+    # Key Home Affairs pages for the 485 visa
+    monitored_urls: list[str] = Field(
+        default=[
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/documents-you-need",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-processing-times/global-processing-times",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/visa-fees",
+        ],
+        alias="MONITORED_URLS",
     )
 
     # ---- Application Settings ----

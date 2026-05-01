@@ -12,6 +12,8 @@ from src.utils.config import settings
 from src.generation.prompt_templates import (
     RAG_PROMPT_TEMPLATE,
     SYSTEM_PROMPT,
+    FOLLOW_UP_TEMPLATE,
+    GROUNDING_PROMPT,
 )
 
 
@@ -110,31 +112,48 @@ class LLMClient:
         Args:
             question: User's question
             context: Retrieved context from vector store
-            chat_history: Optional conversation history
+            chat_history: Optional conversation history text
 
         Returns:
             Generated answer with source citations
         """
-        prompt = RAG_PROMPT_TEMPLATE.format(
-            context=context,
-            question=question,
-        )
+        if chat_history:
+            prompt = FOLLOW_UP_TEMPLATE.format(
+                chat_history=chat_history,
+                context=context,
+                question=question,
+            )
+        else:
+            prompt = RAG_PROMPT_TEMPLATE.format(
+                context=context,
+                question=question,
+            )
         return self.generate(prompt=prompt)
 
     def stream_answer(
         self,
         question: str,
         context: str,
+        chat_history: str | None = None,
     ):
         """
         Stream a RAG response token by token (for real-time UI).
 
+        Supports conversation memory via chat_history parameter.
+
         Yields chunks of text as they are generated.
         """
-        prompt = RAG_PROMPT_TEMPLATE.format(
-            context=context,
-            question=question,
-        )
+        if chat_history:
+            prompt = FOLLOW_UP_TEMPLATE.format(
+                chat_history=chat_history,
+                context=context,
+                question=question,
+            )
+        else:
+            prompt = RAG_PROMPT_TEMPLATE.format(
+                context=context,
+                question=question,
+            )
 
         try:
             stream = self._client.chat.completions.create(
@@ -154,3 +173,45 @@ class LLMClient:
         except Exception as e:
             logger.error("LLM streaming failed: {}", e)
             yield f"Error generating response: {e}"
+
+    def verify_grounding(
+        self,
+        answer: str,
+        context: str,
+    ) -> tuple[str, str]:
+        """
+        Verify whether the generated answer is grounded in the context.
+
+        Uses a lightweight LLM call to check if the answer's claims
+        are supported by the retrieved documents.
+
+        Returns:
+            Tuple of (verdict, explanation) where verdict is one of:
+            "GROUNDED", "PARTIALLY_GROUNDED", "UNGROUNDED"
+        """
+        prompt = GROUNDING_PROMPT.format(
+            context=context[:3000],  # Truncate to avoid token limits
+            answer=answer,
+        )
+        try:
+            raw = self.generate(
+                prompt=prompt,
+                system_prompt="You are a concise fact-checker. Respond with only the verdict and one explanation sentence.",
+                max_tokens=150,
+                temperature=0.0,
+            )
+            # Parse verdict
+            raw_upper = raw.upper().strip()
+            if raw_upper.startswith("GROUNDED"):
+                verdict = "GROUNDED"
+            elif raw_upper.startswith("PARTIALLY_GROUNDED"):
+                verdict = "PARTIALLY_GROUNDED"
+            elif raw_upper.startswith("UNGROUNDED"):
+                verdict = "UNGROUNDED"
+            else:
+                verdict = "UNKNOWN"
+            logger.info("Grounding check: {} — {}", verdict, raw.strip()[:80])
+            return verdict, raw.strip()
+        except Exception as e:
+            logger.warning("Grounding verification failed: {}", e)
+            return "UNKNOWN", str(e)

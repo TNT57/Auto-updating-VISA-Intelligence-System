@@ -146,3 +146,38 @@ class DatabaseManager:
                 .limit(limit)
                 .all()
             )
+
+    def get_changes(
+        self,
+        severity: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ChangeRecord]:
+        """Get changes with optional severity filter."""
+        with self.get_session() as session:
+            query = session.query(ChangeRecord)
+            if severity:
+                query = query.filter(ChangeRecord.severity == severity)
+            return (
+                query.order_by(ChangeRecord.detected_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+
+    def get_change_counts_by_severity(self) -> dict[str, int]:
+        """Get count of changes grouped by severity."""
+        from sqlalchemy import func
+        with self.get_session() as session:
+            rows = (
+                session.query(ChangeRecord.severity, func.count(ChangeRecord.id))
+                .group_by(ChangeRecord.severity)
+                .all()
+            )
+            return {severity: count for severity, count in rows}
+
+    def get_total_changes(self) -> int:
+        """Get total number of recorded changes."""
+        from sqlalchemy import func
+        with self.get_session() as session:
+            return session.query(func.count(ChangeRecord.id)).scalar() or 0

@@ -6,7 +6,7 @@ The Auto-Updating 485 Visa Intelligence System is a multi-phase RAG application 
 
 ---
 
-## Phase 1: Core RAG Pipeline (Current)
+## Phase 1: Core RAG Pipeline ✅
 
 ### Data Flow
 
@@ -65,7 +65,7 @@ User Query → Embed → Similarity Search → Top-K Chunks
 
 ---
 
-## Phase 2: Auto-Update System (Planned)
+## Phase 2: Auto-Update System ✅
 
 ### Scraping Architecture
 

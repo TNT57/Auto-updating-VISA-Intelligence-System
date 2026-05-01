@@ -19,6 +19,7 @@ env/
 
 # Local caches (keeps everything inside project, not on C: drive)
 .cache/
+.pytest_cache/
 
 # IDE
 .vscode/
@@ -30,6 +31,8 @@ env/
 # Data files (large/binary)
 data/raw/pdfs/*.pdf
 data/raw/html_snapshots/
+data/raw/*.txt
+data/raw/*.html
 data/processed/
 data/archives/
 !data/raw/pdfs/.gitkeep

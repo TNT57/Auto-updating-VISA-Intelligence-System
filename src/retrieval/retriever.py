@@ -51,7 +51,7 @@ class QueryResults:
         return "\n\n---\n\n".join(context_parts)
 
     def get_sources(self) -> list[dict]:
-        """Get unique source citations."""
+        """Get unique source citations with excerpt text."""
         seen = set()
         sources = []
         for r in self.results:
@@ -62,6 +62,7 @@ class QueryResults:
                     "source": r.source,
                     "page": r.page_number,
                     "relevance": f"{r.relevance_score:.1%}",
+                    "excerpt": r.content[:500].strip() + ("..." if len(r.content) > 500 else ""),
                 })
         return sources
 

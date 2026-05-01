@@ -4,6 +4,12 @@ Main Streamlit application — Visa 485 Intelligence System.
 Multi-page app with chat interface, change history, alerts, and dashboard.
 """
 
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path so 'src' package is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 
 st.set_page_config(
@@ -26,21 +32,25 @@ st.sidebar.divider()
 # Navigation info
 st.sidebar.markdown("### 📍 Pages")
 st.sidebar.markdown("- 💬 **Chat** — Ask questions about 485 visa")
-st.sidebar.markdown("- 📊 **Changes** — Policy change timeline *(Phase 2)*")
+st.sidebar.markdown("- 📊 **Changes** — Policy change timeline")
 st.sidebar.markdown("- 🔔 **Alerts** — Configure notifications *(Phase 3)*")
 st.sidebar.markdown("- 📈 **Dashboard** — System health *(Phase 4)*")
 
 st.sidebar.divider()
 
-# System status
+# System status — lightweight check (no model loading!)
 st.sidebar.markdown("### ⚙️ System Status")
+
 try:
-    from src.ingestion.vectorstore_manager import VectorStoreManager
-    vs = VectorStoreManager()
-    stats = vs.get_collection_stats()
-    st.sidebar.success(f"✅ Vector DB: {stats['total_chunks']} chunks")
-    st.sidebar.info(f"🤖 Model: {stats['embedding_model']}")
-except Exception:
+    import chromadb
+    from src.utils.config import settings
+
+    client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+    collection = client.get_collection(settings.collection_name)
+    count = collection.count()
+    st.sidebar.success(f"✅ Vector DB: {count} chunks")
+    st.sidebar.info(f"🤖 Model: {settings.embedding_model}")
+except Exception as e:
     st.sidebar.warning("⚠️ Vector DB not initialized")
     st.sidebar.caption("Run `python scripts/initial_setup.py` first")
 

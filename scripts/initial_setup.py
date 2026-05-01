@@ -12,8 +12,18 @@ Usage:
     python scripts/initial_setup.py
 """
 
+import os
 import sys
 from pathlib import Path
+
+# Fix Windows console encoding for emoji/unicode characters
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 # Add project root to Python path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

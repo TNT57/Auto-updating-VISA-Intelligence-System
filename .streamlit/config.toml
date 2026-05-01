@@ -1,0 +1,11 @@
+[server]
+maxUploadSize = 200
+enableXsrfProtection = false
+runOnSave = false
+maxMessageSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = true

@@ -52,7 +52,11 @@ class PDFLoader:
 
     def load_pdf(self, file_path: Path) -> list[DocumentChunk]:
         """
-        Extract text from a PDF file, page by page.
+        Extract text and tables from a PDF file, page by page.
+
+        Tables are extracted via pdfplumber and formatted as markdown
+        rows appended to the page text, preserving structured data
+        (fees, processing times, eligibility criteria, etc.).
 
         Returns a list of DocumentChunk objects, one per page.
         """
@@ -65,8 +69,44 @@ class PDFLoader:
                     "Loading PDF: {} ({} pages)", source_name, len(pdf.pages)
                 )
                 for page_num, page in enumerate(pdf.pages, start=1):
-                    text = page.extract_text()
-                    if text and text.strip():
+                    text = page.extract_text() or ""
+
+                    # --- Table-aware extraction (Improvement #4) ---
+                    tables = page.extract_tables()
+                    if tables:
+                        table_parts = []
+                        for t_idx, table in enumerate(tables):
+                            if not table or len(table) < 2:
+                                continue
+                            # First row as header
+                            header = table[0]
+                            rows = table[1:]
+                            # Build markdown table
+                            md_lines = []
+                            clean_header = [
+                                (c or "").strip().replace("\n", " ")
+                                for c in header
+                            ]
+                            md_lines.append("| " + " | ".join(clean_header) + " |")
+                            md_lines.append(
+                                "| " + " | ".join("---" for _ in clean_header) + " |"
+                            )
+                            for row in rows:
+                                clean_row = [
+                                    (c or "").strip().replace("\n", " ")
+                                    for c in row
+                                ]
+                                md_lines.append(
+                                    "| " + " | ".join(clean_row) + " |"
+                                )
+                            table_parts.append(
+                                f"\n\n[Table {t_idx + 1}]\n"
+                                + "\n".join(md_lines)
+                            )
+                        if table_parts:
+                            text += "".join(table_parts)
+
+                    if text.strip():
                         chunk = DocumentChunk(
                             content=text.strip(),
                             source=source_name,
@@ -76,6 +116,7 @@ class PDFLoader:
                             metadata={
                                 "total_pages": len(pdf.pages),
                                 "file_hash": self.compute_file_hash(file_path),
+                                "has_tables": bool(tables),
                             },
                         )
                         chunks.append(chunk)

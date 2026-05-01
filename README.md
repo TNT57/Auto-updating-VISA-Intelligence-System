@@ -178,7 +178,8 @@ The system is **fully functional**. To test it yourself, you'll need to:
 │   ├── alerts/                 # Notification manager
 │   └── utils/                  # Config, logging, database
 ├── scripts/
-│   └── initial_setup.py        # First-time project setup
+│   ├── initial_setup.py        # First-time project setup
+│   └── daily_update.py         # Automated scrape + change detection + re-ingestion
 ├── .github/workflows/
 │   └── daily_scrape.yml        # Automated daily scraping
 ├── docs/

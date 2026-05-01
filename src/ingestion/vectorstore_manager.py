@@ -10,6 +10,7 @@ from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 from loguru import logger
+from transformers import logging as tf_logging
 
 from src.ingestion.pdf_loader import DocumentChunk
 from src.utils.config import settings
@@ -42,11 +43,19 @@ class VectorStoreManager:
             logger.info(
                 "Loading embedding model: {} ...", settings.embedding_model
             )
-            self._embedding_fn = (
-                embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name=settings.embedding_model
+            # Suppress noisy transformers v5 loading report warnings
+            # (e.g. "UNEXPECTED embeddings.position_ids" which is benign
+            # for sentence-transformer models loaded cross-task/architecture)
+            _prev_verbosity = tf_logging.get_verbosity()
+            tf_logging.set_verbosity_error()
+            try:
+                self._embedding_fn = (
+                    embedding_functions.SentenceTransformerEmbeddingFunction(
+                        model_name=settings.embedding_model
+                    )
                 )
-            )
+            finally:
+                tf_logging.set_verbosity(_prev_verbosity)
             logger.info("Embedding model loaded successfully")
         return self._embedding_fn
 
