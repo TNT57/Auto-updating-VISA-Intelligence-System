@@ -39,7 +39,7 @@ def check_env_file() -> bool:
 
     if not env_path.exists():
         print("❌ No .env file found!")
-        print(f"   Creating .env from .env.example...")
+        print("   Creating .env from .env.example...")
         if env_example.exists():
             import shutil
             shutil.copy(env_example, env_path)
@@ -83,15 +83,24 @@ def check_pdfs() -> bool:
     return True
 
 
-def build_vectorstore() -> bool:
+def build_vectorstore(rebuild: bool = False) -> bool:
     """Build the vector database from PDF documents."""
     try:
         from src.ingestion.pdf_loader import PDFLoader
         from src.ingestion.text_chunker import TextChunker
         from src.ingestion.vectorstore_manager import VectorStoreManager
-        from src.utils.logger import logger
 
         print("\n📚 Building vector database...")
+
+        if rebuild:
+            print("   Rebuilding: dropping the existing collection first...")
+            vs = VectorStoreManager()
+            try:
+                vs.reset_collection()
+                print("   ✅ Collection reset")
+            except Exception as exc:
+                # Nothing to drop on a first run.
+                print(f"   ℹ️  Nothing to reset ({exc})")
 
         # Step 1: Load PDFs
         print("   Step 1/3: Extracting text from PDFs...")
@@ -168,6 +177,19 @@ def test_query() -> bool:
 
 def main():
     """Run the full setup process."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="First-time setup for the 485 Visa Intelligence System."
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Drop and rebuild the vector collection from scratch. Required "
+             "after changing the embedding model or distance metric.",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("🛂 485 Visa Intelligence System — Initial Setup")
     print("=" * 60)
@@ -189,7 +211,7 @@ def main():
     # Step 4: Build vectorstore (only if PDFs exist)
     vs_ok = False
     if pdfs_ok:
-        vs_ok = build_vectorstore()
+        vs_ok = build_vectorstore(rebuild=args.rebuild)
     else:
         print("⏭️  Skipping vectorstore build (no PDFs)")
 

@@ -7,9 +7,9 @@ Provides validated, type-safe settings for the entire application.
 
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
-from pydantic import Field
 
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 # Base project directory
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -37,8 +37,10 @@ class Settings(BaseSettings):
         default="all-mpnet-base-v2", alias="EMBEDDING_MODEL"
     )
 
-    # ---- Discord Alerts (Phase 3) ----
+    # ---- Discord Alerts ----
     discord_webhook_url: str = Field(default="", alias="DISCORD_WEBHOOK_URL")
+    # Only changes at or above this severity trigger an alert.
+    alert_min_severity: str = Field(default="IMPORTANT", alias="ALERT_MIN_SEVERITY")
 
     # ---- Email Alerts (Phase 3) ----
     smtp_server: str = Field(default="smtp.gmail.com", alias="SMTP_SERVER")
@@ -74,6 +76,17 @@ class Settings(BaseSettings):
     )
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, alias="CHUNK_OVERLAP")
+
+    # ---- Change detection ----
+    # How many page snapshots to retain per URL before pruning. Full page text
+    # adds up across daily runs and changes.db is cached between CI runs.
+    snapshot_history: int = Field(default=10, alias="SNAPSHOT_HISTORY")
+    # Cap on LLM severity classifications per run. A page-wide rewrite can
+    # produce dozens of diff blocks, which would otherwise burn Groq's rate
+    # limit; blocks beyond this fall back to keyword classification.
+    max_llm_classifications: int = Field(
+        default=10, alias="MAX_LLM_CLASSIFICATIONS"
+    )
 
     # ---- Derived Paths ----
     @property

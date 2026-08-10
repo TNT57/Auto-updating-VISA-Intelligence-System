@@ -10,14 +10,14 @@ This system monitors the Australian Department of Home Affairs website for chang
 
 | Feature | How It Works |
 |---|---|
-| **PDF Ingestion & Chunking** | Extracts text from government PDFs using `pdfplumber`, splits into semantic chunks with `LangChain` |
-| **Vector Search (RAG)** | Embeds chunks with `SentenceTransformers`, stores in `ChromaDB`, retrieves relevant context for queries |
-| **AI-Powered Chat** | Uses `Groq` (Llama 3) to generate grounded answers based on retrieved document context |
+| **PDF Ingestion & Chunking** | Extracts text and tables from government PDFs using `pdfplumber`, splits into semantic chunks with `langchain-text-splitters` |
+| **Vector Search (RAG)** | Embeds chunks with `SentenceTransformers` (`all-mpnet-base-v2`), stores in `ChromaDB`, retrieves relevant context for queries |
+| **AI-Powered Chat** | Uses `Groq` (Llama 3.3 70B) to generate grounded answers, then re-checks each answer against its sources |
 | **Web Scraping & Monitoring** | Scrapes the Home Affairs website on a schedule via `BeautifulSoup`, detects content changes |
-| **Change Detection** | Stores historical snapshots in `SQLite` and diffs them to flag policy updates |
-| **Alerts** | Sends notifications for detected changes via Discord webhooks |
-| **Dashboard** | `Streamlit` multi-page app with chat, change log, and alert configuration |
-| **Automated Pipeline** | GitHub Actions workflow runs daily scraping and re-ingestion |
+| **Change Detection** | Stores page snapshots in `SQLite` and diffs them to flag policy updates, with LLM severity classification |
+| **Alerts** | Sends Discord webhook notifications for changes at or above a configurable severity |
+| **Dashboard** | `Streamlit` multi-page app with chat, change log, and alert status |
+| **Automated Pipeline** | GitHub Actions workflow runs daily scraping, change detection, re-ingestion, and alerting |
 
 ## Why This Project
 
@@ -66,13 +66,13 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical breakd
 
 | Category | Tools |
 |---|---|
-| **LLM & RAG** | LangChain, Groq (Llama 3), SentenceTransformers |
+| **LLM & RAG** | langchain-text-splitters, Groq (Llama 3.3), SentenceTransformers |
 | **Vector DB** | ChromaDB |
 | **Data Processing** | pdfplumber, pypdf, BeautifulSoup4, pandas |
-| **Backend** | Python, SQLAlchemy, APScheduler |
+| **Backend** | Python, SQLAlchemy, httpx |
 | **Frontend** | Streamlit (multi-page), Plotly |
 | **Database** | SQLite |
-| **CI/CD** | GitHub Actions |
+| **CI/CD** | GitHub Actions, pytest, ruff |
 | **Alerts** | Discord Webhooks |
 
 ## Getting Started
@@ -142,23 +142,39 @@ Cache directories are configured in two places so they always point inside the p
 
 ### Project Status
 
-| Component | Status |
-|---|---|
-| PDF ingestion & chunking | ✅ Working |
-| Vector store (ChromaDB) | ✅ Working |
-| RAG retrieval pipeline | ✅ Working |
-| LLM chat (Groq) | ✅ Working |
-| Streamlit dashboard | ✅ Working |
-| Web scraper | ✅ Working |
-| Change detection | ✅ Working |
-| Alert system (Discord) | ✅ Working |
-| GitHub Actions daily scrape | ✅ Configured |
+| Component | Status | Notes |
+|---|---|---|
+| PDF ingestion & chunking | ✅ Working | Includes table → markdown extraction |
+| Vector store (ChromaDB) | ✅ Working | Cosine distance, `all-mpnet-base-v2` |
+| RAG retrieval pipeline | ✅ Working | |
+| LLM chat (Groq) | ✅ Working | Streaming, conversation memory, grounding check |
+| Streamlit dashboard | ✅ Working | Chat and Changes pages |
+| Web scraper | ✅ Working | 4 monitored URLs, conditional GET for PDFs |
+| Change detection | ✅ Working | Snapshots persist in SQLite |
+| Alert system (Discord) | ✅ Working | Set `DISCORD_WEBHOOK_URL` to enable |
+| Email alerts | ❌ Not implemented | SMTP settings exist in config but are unused |
+| Alerts config page | ⚠️ Read-only | Shows status; configure via `.env`, not the UI |
+| GitHub Actions daily scrape | ✅ Configured | State cached between runs |
+| CI (tests + lint) | ✅ Configured | `.github/workflows/tests.yml` |
 
-The system is **fully functional**. To test it yourself, you'll need to:
+To run it yourself:
 1. Add a `GROQ_API_KEY` to your `.env` file (free at [console.groq.com](https://console.groq.com/keys))
 2. Place at least one PDF document in `data/raw/pdfs/`
 3. Run `python scripts/initial_setup.py` to build the vector database
 4. Launch with `streamlit run app/streamlit_app.py`
+
+> **Upgrading an existing install?** The vector collection now uses cosine
+> distance instead of Chroma's default squared-L2. Rebuild it once with
+> `python scripts/initial_setup.py --rebuild`, otherwise relevance scores will
+> keep reading 0%.
+
+### How the daily update stays stateful
+
+Change detection only works if the previous scrape survives to the next run.
+Page snapshots and PDF ingestion hashes both live in `database/changes.db`,
+which the GitHub Actions workflow restores from cache at the start of every
+run. That single file is the only state the pipeline needs; the HTML files
+under `data/raw/html_snapshots/` are a local archive, not the source of truth.
 
 ## Project Structure
 
@@ -178,13 +194,22 @@ The system is **fully functional**. To test it yourself, you'll need to:
 │   ├── alerts/                 # Notification manager
 │   └── utils/                  # Config, logging, database
 ├── scripts/
-│   ├── initial_setup.py        # First-time project setup
-│   └── daily_update.py         # Automated scrape + change detection + re-ingestion
+│   ├── initial_setup.py        # First-time setup (--rebuild to reset the vector DB)
+│   └── daily_update.py         # Scrape → detect changes → re-ingest → alert
 ├── .github/workflows/
-│   └── daily_scrape.yml        # Automated daily scraping
+│   ├── daily_scrape.yml        # Automated daily scraping
+│   └── tests.yml               # pytest + ruff on every push
 ├── docs/
 │   └── ARCHITECTURE.md         # Detailed architecture docs
-└── tests/                      # Unit tests
+└── tests/                      # Unit + integration tests
+```
+
+## Development
+
+```bash
+pytest                      # unit tests (fast, fully mocked)
+pytest -m integration       # real embeddings + real ChromaDB (slow)
+ruff check .                # lint
 ```
 
 ## What I Learned

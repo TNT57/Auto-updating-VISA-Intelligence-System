@@ -27,17 +27,22 @@ User Query → Embed → Similarity Search → Top-K Chunks
 - **Error handling**: Graceful handling of corrupted/encrypted PDFs
 
 #### 2. Text Chunker (`src/ingestion/text_chunker.py`)
-- **Library**: LangChain RecursiveCharacterTextSplitter
+- **Library**: `langchain-text-splitters` RecursiveCharacterTextSplitter
 - **Strategy**: Recursive splitting with 1000-char chunks, 200-char overlap
 - **Metadata preservation**: Each chunk carries source file + page number
 - **Why recursive**: Handles natural document boundaries (paragraphs, sentences)
 
 #### 3. Vector Store Manager (`src/ingestion/vectorstore_manager.py`)
 - **Library**: ChromaDB + Sentence-Transformers
-- **Model**: `all-MiniLM-L6-v2` (80MB, 384 dimensions)
+- **Model**: `all-mpnet-base-v2` (420MB, 768 dimensions)
+- **Distance metric**: cosine (`hnsw:space`), so `1 - distance` is a usable
+  0-1 relevance score. Chroma's default squared-L2 ranges 0-4 and would make
+  most scores read as 0%.
 - **Storage**: Persistent local directory (`database/vectorstore/`)
 - **Collection**: Named `visa_485_documents`
-- **Operations**: Add chunks, query similarity, get stats, reset
+- **Operations**: Add chunks, query similarity, get stats, reset, delete by source
+- **Changing the model or metric** requires a rebuild:
+  `python scripts/initial_setup.py --rebuild`
 
 #### 4. Retriever (`src/retrieval/retriever.py`)
 - **Purpose**: Bridge between user queries and vector store
@@ -92,7 +97,23 @@ GitHub Actions (cron: 2 AM daily)
          │
          ▼
    Store in SQLite + Update ChromaDB
+         │
+         ▼
+┌─────────────────┐
+│  Alert Manager  │──▶ Discord webhook (severity ≥ ALERT_MIN_SEVERITY)
+│  (httpx)        │──▶ Log delivery, mark change notified=2
+└─────────────────┘
 ```
+
+### State persistence
+
+Change detection needs the previous scrape to still exist on the next run.
+GitHub Actions runners are ephemeral and `database/` is gitignored, so the
+workflow restores `database/changes.db` from `actions/cache` before each run
+and saves it after. That one file holds both the page snapshots
+(`page_snapshots`) and the PDF ingestion hashes (`documents`), so it is the
+only state the pipeline depends on. HTML files under
+`data/raw/html_snapshots/` are a local debugging archive only.
 
 ### Monitored URLs
 - Main 485 visa page
@@ -107,53 +128,78 @@ GitHub Actions (cron: 2 AM daily)
 
 ---
 
-## Phase 3: Intelligence Layer (Planned)
+## Alert System ✅
 
-### Temporal RAG
-- Version-controlled document snapshots
-- Time-aware queries: "What were the requirements in January?"
-- Change timeline with Plotly visualizations
+- **Discord webhooks**: one message per run, with an embed per change
+  (`src/alerts/alert_manager.py`)
+- **Severity filter**: `ALERT_MIN_SEVERITY` (default `IMPORTANT`)
+- **Deduplication**: `changes.notified` is set to 2 on success, so a re-run
+  never alerts on the same change twice. A failed send leaves the change
+  pending for the next run.
+- **Audit trail**: every attempt is written to `alert_logs` and surfaced on
+  the Alerts page
 
-### Alert System
-- **Discord webhooks**: Rich embeds with change details
-- **Email**: SMTP-based daily/weekly digests
-- **Severity filters**: Only get alerts you care about
+### Not yet implemented
+- **Email digests**: SMTP settings exist in `config.py` but no channel uses them
+- **Temporal RAG**: time-aware queries ("what were the requirements in
+  January?"). `src/temporal/` is an empty placeholder.
 
 ---
 
 ## Database Schema
 
-### SQLite — Change Tracking (Phase 2)
+### SQLite — Change Tracking
 
 ```sql
 CREATE TABLE changes (
     id INTEGER PRIMARY KEY,
-    detected_at DATETIME,
-    source_url TEXT,
-    change_type TEXT,      -- 'content', 'pdf', 'field'
-    severity TEXT,         -- 'critical', 'important', 'minor'
+    document_id INTEGER,
+    severity TEXT,         -- 'CRITICAL', 'IMPORTANT', 'MINOR'
+    change_type TEXT,      -- 'content_update', 'content_added', ...
     old_value TEXT,
     new_value TEXT,
     summary TEXT,
-    ai_analysis TEXT
+    detected_at DATETIME,
+    source_url TEXT,
+    notified INTEGER       -- 0=no, 1=pending, 2=sent
 );
 
-CREATE TABLE snapshots (
+CREATE TABLE page_snapshots (
     id INTEGER PRIMARY KEY,
-    captured_at DATETIME,
-    source_url TEXT,
+    url TEXT,
+    title TEXT,
+    content TEXT,          -- extracted page text, diffed on the next run
     content_hash TEXT,
-    file_path TEXT
+    scraped_at DATETIME
+);
+
+CREATE TABLE documents (
+    id INTEGER PRIMARY KEY,
+    source_url TEXT,
+    file_path TEXT,
+    file_hash TEXT,        -- skips re-ingesting unchanged PDFs
+    version INTEGER,
+    ingested_at DATETIME,
+    last_modified DATETIME
+);
+
+CREATE TABLE alert_logs (
+    id INTEGER PRIMARY KEY,
+    change_id INTEGER,
+    channel TEXT,          -- 'discord'
+    status TEXT,           -- 'sent', 'failed'
+    sent_at DATETIME,
+    error_message TEXT
 );
 ```
 
 ### ChromaDB — Vector Store
 
 ```
-Collection: visa_485_documents
+Collection: visa_485_documents (cosine distance)
 ├── documents: [chunk_text, ...]
-├── embeddings: [384-dim vectors, ...]
-├── metadatas: [{source, page, chunk_index}, ...]
+├── embeddings: [768-dim vectors, ...]
+├── metadatas: [{source, page_number, chunk_index, doc_type}, ...]
 └── ids: [uuid, ...]
 ```
 

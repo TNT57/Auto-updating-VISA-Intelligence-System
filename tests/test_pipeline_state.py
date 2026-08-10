@@ -1,0 +1,351 @@
+"""
+Tests for pipeline state persistence, alerting, and severity classification.
+
+These cover the behaviours that make the "auto-updating" claim true:
+snapshots surviving between runs, changes being alerted exactly once, and the
+severity classifier actually seeing the new text.
+"""
+
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+
+@pytest.fixture
+def db(tmp_path):
+    """A DatabaseManager backed by a throwaway SQLite file."""
+    from src.utils.db_manager import DatabaseManager
+
+    manager = DatabaseManager(db_path=str(tmp_path / "test.db"))
+    manager.create_tables()
+    return manager
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Page snapshot persistence
+# ══════════════════════════════════════════════════════════════════════
+
+class TestPageSnapshots:
+    """The state that makes day-over-day change detection possible."""
+
+    def test_no_snapshot_returns_none(self, db):
+        assert db.get_latest_page_snapshot("https://example.com/visa") is None
+
+    def test_snapshot_round_trip(self, db):
+        db.save_page_snapshot(
+            url="https://example.com/visa",
+            content="The fee is $1,895.",
+            content_hash="abc123",
+            title="Visa fees",
+        )
+        snapshot = db.get_latest_page_snapshot("https://example.com/visa")
+
+        assert snapshot is not None
+        assert snapshot["content"] == "The fee is $1,895."
+        assert snapshot["content_hash"] == "abc123"
+        assert snapshot["title"] == "Visa fees"
+
+    def test_latest_snapshot_wins(self, db):
+        url = "https://example.com/visa"
+        db.save_page_snapshot(url=url, content="old", content_hash="h1")
+        db.save_page_snapshot(url=url, content="new", content_hash="h2")
+
+        assert db.get_latest_page_snapshot(url)["content"] == "new"
+
+    def test_snapshots_are_isolated_per_url(self, db):
+        db.save_page_snapshot(url="https://a.test", content="A", content_hash="a")
+        db.save_page_snapshot(url="https://b.test", content="B", content_hash="b")
+
+        assert db.get_latest_page_snapshot("https://a.test")["content"] == "A"
+        assert db.get_latest_page_snapshot("https://b.test")["content"] == "B"
+
+    def test_prune_keeps_most_recent(self, db):
+        url = "https://example.com/visa"
+        for i in range(8):
+            db.save_page_snapshot(url=url, content=f"v{i}", content_hash=f"h{i}")
+
+        deleted = db.prune_page_snapshots(url, keep=3)
+
+        assert deleted == 5
+        # The newest snapshot must survive pruning.
+        assert db.get_latest_page_snapshot(url)["content"] == "v7"
+
+
+class TestLoadPreviousContent:
+    """
+    Regression guard for the bug that made the scheduled pipeline useless.
+
+    Previously this read gitignored HTML files off disk, so on an ephemeral CI
+    runner the second run re-baselined instead of detecting a change.
+    """
+
+    def test_second_run_sees_the_first_runs_content(self, db):
+        from scripts.daily_update import load_previous_content
+
+        url = "https://immi.homeaffairs.gov.au/visas/temporary-graduate-485"
+
+        # Run 1: nothing stored yet, so this is a baseline.
+        assert load_previous_content(url, db) is None
+        db.save_page_snapshot(url=url, content="Fee: $1,895", content_hash="h1")
+
+        # Run 2: must see run 1's content rather than re-baselining.
+        assert load_previous_content(url, db) == "Fee: $1,895"
+
+    def test_detects_a_real_change_across_two_runs(self, db):
+        from scripts.daily_update import load_previous_content
+        from src.monitoring.change_detector import ChangeDetector
+
+        detector = ChangeDetector(db=db, use_llm=False)
+        url = "https://immi.homeaffairs.gov.au/visas/visa-fees"
+
+        # Run 1 — baseline, no changes expected.
+        first = detector.compare_and_record(
+            old_content=load_previous_content(url, db),
+            new_content="The visa fee is $1,895.",
+            source_url=url,
+        )
+        db.save_page_snapshot(
+            url=url, content="The visa fee is $1,895.", content_hash="h1"
+        )
+        assert first == []
+
+        # Run 2 — the fee changed, so this must be detected and recorded.
+        second = detector.compare_and_record(
+            old_content=load_previous_content(url, db),
+            new_content="The visa fee is $2,000.",
+            source_url=url,
+        )
+
+        assert len(second) > 0
+        assert len(db.get_recent_changes(limit=10)) == len(second)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Severity classification
+# ══════════════════════════════════════════════════════════════════════
+
+class TestSeverityClassification:
+    """The classifier must see the new text, not only the old."""
+
+    def test_new_text_drives_severity(self, db):
+        """
+        Regression: `old or "" + new or ""` parsed as `old or ("" + new)`,
+        so for a replace the new text never reached the classifier.
+        """
+        from src.monitoring.change_detector import ChangeDetector
+
+        detector = ChangeDetector(db=db, use_llm=False)
+
+        # "Contact us" is MINOR; the replacement introduces an eligibility
+        # requirement, which is CRITICAL. Only the new text carries the signal.
+        changes = detector.compare(
+            old_content="Contact us on our website.",
+            new_content="You must meet the eligibility criteria.",
+            source_url="https://example.com",
+        )
+
+        assert changes
+        assert any(c["severity"] == "CRITICAL" for c in changes)
+
+    def test_llm_classification_is_capped(self, db):
+        """A page-wide rewrite must not fire one LLM call per diff block."""
+        from src.monitoring.change_detector import ChangeDetector
+
+        detector = ChangeDetector(db=db, use_llm=True)
+        fake_llm = MagicMock()
+        fake_llm.generate.return_value = "MINOR — formatting only"
+        detector._llm_client = fake_llm
+
+        old = "\n".join(f"old line {i}" for i in range(40))
+        new = "\n".join(f"new line {i}" for i in range(40))
+
+        with patch("src.monitoring.change_detector.settings") as mock_settings:
+            mock_settings.max_llm_classifications = 3
+            detector.compare(old, new, source_url="https://example.com")
+
+        assert fake_llm.generate.call_count <= 3
+
+    def test_keyword_fallback_when_llm_unavailable(self, db):
+        from src.monitoring.change_detector import ChangeDetector
+
+        detector = ChangeDetector(db=db, use_llm=False)
+        assert detector.classify_severity("processing time updated") == "CRITICAL"
+        assert detector.classify_severity("the application fee changed") == "IMPORTANT"
+        assert detector.classify_severity("footer colour tweak") == "MINOR"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Scraped page ingestion
+# ══════════════════════════════════════════════════════════════════════
+
+class TestIngestScrapedPages:
+    """Monitored pages must be searchable, not just diffed."""
+
+    def _result(self, url="https://immi.test/fees", content="The fee is $2,235."):
+        return {
+            "url": url,
+            "title": "Visa fees",
+            "content": content,
+            "content_hash": "h1",
+            "timestamp": "2026-01-01T00:00:00",
+        }
+
+    def test_pages_are_chunked_and_added(self):
+        from scripts.daily_update import ingest_scraped_pages
+
+        fake_store = MagicMock()
+        with patch("src.ingestion.vectorstore_manager.VectorStoreManager",
+                   return_value=fake_store):
+            added = ingest_scraped_pages([self._result()])
+
+        assert added > 0
+        fake_store.add_chunks.assert_called_once()
+
+        chunks = fake_store.add_chunks.call_args[0][0]
+        assert all(c.doc_type == "webpage" for c in chunks)
+        # source must be the URL so deletes stay stable across title changes
+        assert all(c.source == "https://immi.test/fees" for c in chunks)
+        assert chunks[0].metadata["title"] == "Visa fees"
+
+    def test_stale_chunks_are_deleted_before_reinsert(self):
+        from scripts.daily_update import ingest_scraped_pages
+
+        fake_store = MagicMock()
+        with patch("src.ingestion.vectorstore_manager.VectorStoreManager",
+                   return_value=fake_store):
+            ingest_scraped_pages([self._result()])
+
+        fake_store.delete_document.assert_called_once_with(
+            "https://immi.test/fees"
+        )
+
+    def test_failed_and_empty_scrapes_are_skipped(self):
+        from scripts.daily_update import ingest_scraped_pages
+
+        fake_store = MagicMock()
+        results = [
+            {"url": "https://a.test", "error": "timeout", "content": None},
+            {"url": "https://b.test", "content": "   "},
+        ]
+        with patch("src.ingestion.vectorstore_manager.VectorStoreManager",
+                   return_value=fake_store):
+            assert ingest_scraped_pages(results) == 0
+
+        fake_store.add_chunks.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Alerting
+# ══════════════════════════════════════════════════════════════════════
+
+class TestAlertManager:
+    """Discord delivery, deduplication, and failure logging."""
+
+    def _record(self, db, severity="CRITICAL"):
+        return db.record_change(
+            severity=severity,
+            change_type="content_update",
+            old_value="fee is $1,895",
+            new_value="fee is $2,000",
+            summary="Visa fee increased",
+            source_url="https://immi.homeaffairs.gov.au/visa-fees",
+        )
+
+    def test_disabled_without_webhook(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        manager = AlertManager(db=db, webhook_url="")
+        assert manager.enabled is False
+        assert manager.send_pending_alerts() == 0
+
+    def test_sends_and_marks_notified(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        self._record(db)
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+
+        with patch.object(manager, "_post") as mock_post:
+            sent = manager.send_pending_alerts()
+
+        assert sent == 1
+        mock_post.assert_called_once()
+
+        # Second run must not re-alert on the same change.
+        with patch.object(manager, "_post") as mock_post:
+            assert manager.send_pending_alerts() == 0
+            mock_post.assert_not_called()
+
+    def test_minor_changes_are_not_alerted_by_default(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        self._record(db, severity="MINOR")
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+
+        with patch.object(manager, "_post") as mock_post:
+            assert manager.send_pending_alerts() == 0
+            mock_post.assert_not_called()
+
+    def test_failure_is_logged_and_change_stays_pending(self, db):
+        from src.alerts.alert_manager import AlertManager
+        from src.utils.db_manager import AlertLog
+
+        self._record(db)
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+
+        with patch.object(manager, "_post", side_effect=RuntimeError("503")):
+            assert manager.send_pending_alerts() == 0
+
+        with db.get_session() as session:
+            logs = session.query(AlertLog).all()
+            assert len(logs) == 1
+            assert logs[0].status == "failed"
+            assert "503" in logs[0].error_message
+
+        # A failed send must leave the change eligible for the next run.
+        assert len(db.get_unnotified_changes()) == 1
+
+    def test_payload_shape(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        self._record(db)
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+        payload = manager._build_payload(db.get_unnotified_changes())
+
+        assert "content" in payload
+        assert len(payload["embeds"]) == 1
+        embed = payload["embeds"][0]
+        assert "CRITICAL" in embed["title"]
+        assert embed["description"] == "Visa fee increased"
+        field_text = " ".join(f["value"] for f in embed["fields"])
+        assert "$1,895" in field_text
+        assert "$2,000" in field_text
+
+    def test_payload_caps_embeds_at_discord_limit(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        for _ in range(14):
+            self._record(db)
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+        payload = manager._build_payload(db.get_unnotified_changes())
+
+        # 10 change embeds plus one "and N more" overflow embed.
+        assert len(payload["embeds"]) == 11
+
+    def test_severity_threshold_is_configurable(self, db):
+        from src.alerts.alert_manager import AlertManager
+
+        manager = AlertManager(db=db, webhook_url="https://discord.test/hook")
+
+        with patch("src.alerts.alert_manager.settings") as mock_settings:
+            mock_settings.alert_min_severity = "CRITICAL"
+            assert manager.severities_to_alert() == ("CRITICAL",)
+
+            mock_settings.alert_min_severity = "MINOR"
+            assert set(manager.severities_to_alert()) == {
+                "MINOR", "IMPORTANT", "CRITICAL"
+            }
