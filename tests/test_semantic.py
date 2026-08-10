@@ -567,7 +567,7 @@ class TestConversationMemorySemantic:
             lines.append(f"{role}: {content}")
 
         history = "\n".join(lines)
-        user_line = [l for l in history.split("\n") if l.startswith("User:")][0]
+        user_line = [line for line in history.split("\n") if line.startswith("User:")][0]
         assert len(user_line) <= 510
 
 
@@ -583,8 +583,8 @@ class TestEndToEndSemantic:
 
     def test_full_rag_pipeline_fee_question(self, mock_vectorstore_with_facts):
         """Full pipeline for a fee question should produce a grounded answer."""
-        from src.retrieval.retriever import Retriever
         from src.generation.prompt_templates import RAG_PROMPT_TEMPLATE
+        from src.retrieval.retriever import Retriever
 
         retriever = Retriever(vectorstore=mock_vectorstore_with_facts)
         results = retriever.retrieve("How much does the 485 visa cost?")
@@ -600,8 +600,8 @@ class TestEndToEndSemantic:
 
     def test_full_rag_pipeline_eligibility_question(self, mock_vectorstore_with_facts):
         """Full pipeline for an eligibility question should include requirements."""
-        from src.retrieval.retriever import Retriever
         from src.generation.prompt_templates import RAG_PROMPT_TEMPLATE
+        from src.retrieval.retriever import Retriever
 
         retriever = Retriever(vectorstore=mock_vectorstore_with_facts)
         results = retriever.retrieve("What are the English requirements?")
@@ -617,8 +617,8 @@ class TestEndToEndSemantic:
 
     def test_grounding_pipeline_grounded_answer(self, mock_vectorstore_with_facts):
         """A correct answer should be detected as GROUNDED by the verification."""
-        from src.retrieval.retriever import Retriever
         from src.generation.llm_client import LLMClient
+        from src.retrieval.retriever import Retriever
 
         retriever = Retriever(vectorstore=mock_vectorstore_with_facts)
         results = retriever.retrieve("visa fee")
@@ -652,8 +652,8 @@ class TestEndToEndSemantic:
 
     def test_grounding_pipeline_hallucinated_answer(self, mock_vectorstore_with_facts):
         """A hallucinated answer should be detected as UNGROUNDED."""
-        from src.retrieval.retriever import Retriever
         from src.generation.llm_client import LLMClient
+        from src.retrieval.retriever import Retriever
 
         retriever = Retriever(vectorstore=mock_vectorstore_with_facts)
         results = retriever.retrieve("visa fee")

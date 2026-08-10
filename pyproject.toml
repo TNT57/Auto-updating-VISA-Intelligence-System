@@ -1,0 +1,43 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = [
+    ".venv",
+    ".cache",
+    "database",
+    "data",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear — catches the operator-precedence class of bug
+    "C4",   # comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit pages must call st.set_page_config() before other imports run,
+# so module-level imports are deliberately not all at the top.
+"app/*" = ["E402"]
+"app/pages/*" = ["E402"]
+"scripts/*" = ["E402"]
+"tests/*" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Integration tests download the embedding model and build a real ChromaDB
+# collection, so they are opt-in: run them with `pytest -m integration`.
+addopts = "-m 'not integration'"
+markers = [
+    "integration: slow tests that use real embeddings and a real vector store",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

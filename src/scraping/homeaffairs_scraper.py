@@ -223,7 +223,9 @@ class HomeAffairsScraper:
         # Build a short slug from the URL path
         path_part = url.split("immi.homeaffairs.gov.au", 1)[-1].strip("/")
         slug = re.sub(r"[^\w]+", "_", path_part).strip("_")[:80]
-        date_str = datetime.utcnow().strftime("%Y%m%d")
+        # Full timestamp, not just the date — two runs on the same day would
+        # otherwise overwrite each other's snapshot.
+        date_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"{date_str}_{slug}.html"
         dest = self.output_dir / filename
         dest.write_text(html, encoding="utf-8")

@@ -8,13 +8,13 @@ Includes retry logic and streaming support.
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from src.utils.config import settings
 from src.generation.prompt_templates import (
-    RAG_PROMPT_TEMPLATE,
-    SYSTEM_PROMPT,
     FOLLOW_UP_TEMPLATE,
     GROUNDING_PROMPT,
+    RAG_PROMPT_TEMPLATE,
+    SYSTEM_PROMPT,
 )
+from src.utils.config import settings
 
 
 class LLMClient:

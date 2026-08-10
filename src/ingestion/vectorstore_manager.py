@@ -66,7 +66,16 @@ class VectorStoreManager:
             self._collection = self.client.get_or_create_collection(
                 name=self.COLLECTION_NAME,
                 embedding_function=self.embedding_function,
-                metadata={"description": "485 Visa policy documents"},
+                metadata={
+                    "description": "485 Visa policy documents",
+                    # Chroma defaults to squared L2, which ranges 0-4 for
+                    # normalized embeddings and breaks the 1-distance
+                    # relevance score in retriever.py. Cosine keeps distances
+                    # in 0-2 and makes the score meaningful.
+                    # NOTE: changing this requires rebuilding the collection —
+                    # run scripts/initial_setup.py --rebuild.
+                    "hnsw:space": "cosine",
+                },
             )
             logger.info(
                 "Collection '{}' loaded — {} documents",

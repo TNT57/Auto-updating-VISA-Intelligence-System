@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
+
 from src.utils.config import settings
 
 st.set_page_config(
@@ -75,6 +76,53 @@ st.warning(
     "official documents but may not reflect the very latest changes."
 )
 
+# ---- Sidebar: Chat controls ----
+# Rendered before the chat handler below so `n_results` is defined by the
+# time a question is answered — Streamlit executes the script top to bottom.
+with st.sidebar:
+    st.markdown("### 💬 Chat Controls")
+
+    n_results = st.slider(
+        "Number of sources to retrieve",
+        min_value=1,
+        max_value=10,
+        value=5,
+        help="More sources = more context but slower responses",
+    )
+
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+    st.divider()
+
+    # Show vectorstore stats
+    st.markdown("### 📊 Vector Store")
+    try:
+        stats = st.session_state.retriever.vectorstore.get_collection_stats()
+        st.metric("Total Chunks", stats["total_chunks"])
+        st.caption(f"Model: {stats['embedding_model']}")
+    except Exception:
+        st.info("Run setup script first")
+
+    st.divider()
+
+    # Example questions — clicking one queues it as the next question.
+    st.markdown("### 💡 Example Questions")
+    examples = [
+        "What are the English requirements?",
+        "How long is the 485 visa valid?",
+        "What documents do I need?",
+        "What is the application fee?",
+        "Can I include family members?",
+        "What are the eligibility criteria?",
+    ]
+    for ex in examples:
+        if st.button(ex, key=f"ex_{ex}", use_container_width=True):
+            st.session_state.pending_question = ex
+            st.rerun()
+
+
 def _render_sources(sources: list[dict], key_prefix: str = "src") -> None:
     """Render source citations with excerpts and PDF download links."""
     pdf_dir = settings.raw_pdf_dir
@@ -111,7 +159,13 @@ for msg_idx, message in enumerate(st.session_state.messages):
             _render_sources(message["sources"], key_prefix=f"hist_{msg_idx}")
 
 # ---- Chat input ----
-if prompt := st.chat_input("Ask about the 485 visa..."):
+# A queued example question stands in for typed input on the rerun that
+# follows the button click.
+prompt = st.chat_input("Ask about the 485 visa...") or st.session_state.pop(
+    "pending_question", None
+)
+
+if prompt:
     # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -124,7 +178,7 @@ if prompt := st.chat_input("Ask about the 485 visa..."):
                 # Step 1: Retrieve relevant chunks
                 results = st.session_state.retriever.retrieve(
                     query=prompt,
-                    n_results=5,
+                    n_results=n_results,
                 )
 
                 # Step 2: Format context for LLM
@@ -164,7 +218,7 @@ if prompt := st.chat_input("Ask about the 485 visa..."):
                         st.success(f"✅ Answer verified: {grounding_explanation}")
                     elif grounding_verdict == "PARTIALLY_GROUNDED":
                         st.warning(f"⚠️ Partially grounded: {grounding_explanation}")
-                    elif grounding_verdict == "UNGUARDED":
+                    elif grounding_verdict == "UNGROUNDED":
                         st.error(f"❌ Ungrounded answer: {grounding_explanation}")
                 except Exception:
                     pass  # Non-critical — don't block the answer
@@ -196,48 +250,3 @@ if prompt := st.chat_input("Ask about the 485 visa..."):
                     "content": error_msg,
                 })
 
-# ---- Sidebar: Chat controls ----
-with st.sidebar:
-    st.markdown("### 💬 Chat Controls")
-
-    # Number of results
-    n_results = st.slider(
-        "Number of sources to retrieve",
-        min_value=1,
-        max_value=10,
-        value=5,
-        help="More sources = more context but slower responses",
-    )
-
-    # Clear chat
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
-        st.session_state.messages = []
-        st.rerun()
-
-    st.divider()
-
-    # Show vectorstore stats
-    st.markdown("### 📊 Vector Store")
-    try:
-        stats = st.session_state.retriever.vectorstore.get_collection_stats()
-        st.metric("Total Chunks", stats["total_chunks"])
-        st.caption(f"Model: {stats['embedding_model']}")
-    except Exception:
-        st.info("Run setup script first")
-
-    st.divider()
-
-    # Example questions
-    st.markdown("### 💡 Example Questions")
-    examples = [
-        "What are the English requirements?",
-        "How long is the 485 visa valid?",
-        "What documents do I need?",
-        "What is the application fee?",
-        "Can I include family members?",
-        "What are the eligibility criteria?",
-    ]
-    for ex in examples:
-        if st.button(ex, key=f"ex_{ex}", use_container_width=True):
-            st.chat_input("Ask about the 485 visa...", key=f"input_{ex}")
-            # This sets the prompt — user clicks example then presses enter

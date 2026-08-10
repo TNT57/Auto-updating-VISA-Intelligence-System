@@ -33,8 +33,7 @@ st.sidebar.divider()
 st.sidebar.markdown("### 📍 Pages")
 st.sidebar.markdown("- 💬 **Chat** — Ask questions about 485 visa")
 st.sidebar.markdown("- 📊 **Changes** — Policy change timeline")
-st.sidebar.markdown("- 🔔 **Alerts** — Configure notifications *(Phase 3)*")
-st.sidebar.markdown("- 📈 **Dashboard** — System health *(Phase 4)*")
+st.sidebar.markdown("- 🔔 **Alerts** — Discord notification status")
 
 st.sidebar.divider()
 
@@ -43,14 +42,16 @@ st.sidebar.markdown("### ⚙️ System Status")
 
 try:
     import chromadb
+
+    from src.ingestion.vectorstore_manager import VectorStoreManager
     from src.utils.config import settings
 
     client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-    collection = client.get_collection(settings.collection_name)
+    collection = client.get_collection(VectorStoreManager.COLLECTION_NAME)
     count = collection.count()
     st.sidebar.success(f"✅ Vector DB: {count} chunks")
     st.sidebar.info(f"🤖 Model: {settings.embedding_model}")
-except Exception as e:
+except Exception:
     st.sidebar.warning("⚠️ Vector DB not initialized")
     st.sidebar.caption("Run `python scripts/initial_setup.py` first")
 

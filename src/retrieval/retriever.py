@@ -25,8 +25,15 @@ class RetrievalResult:
 
     @property
     def relevance_score(self) -> float:
-        """Convert distance to a 0-1 relevance score (1 = most relevant)."""
-        return max(0.0, 1.0 - self.distance)
+        """
+        Convert distance to a 0-1 relevance score (1 = most relevant).
+
+        Assumes the collection uses cosine distance (set in
+        VectorStoreManager.collection), which ranges 0-2. The clamp keeps
+        the score sane if a collection built with another distance metric
+        is ever queried.
+        """
+        return max(0.0, min(1.0, 1.0 - self.distance))
 
 
 @dataclass
@@ -102,7 +109,9 @@ class Retriever:
             metas = raw_results["metadatas"][0]
             dists = raw_results["distances"][0]
 
-            for doc, meta, dist in zip(docs, metas, dists):
+            # Chroma returns these three lists at equal length; strict=False
+            # keeps a malformed response from crashing the chat UI.
+            for doc, meta, dist in zip(docs, metas, dists, strict=False):
                 result = RetrievalResult(
                     content=doc,
                     source=meta.get("source", "unknown"),
