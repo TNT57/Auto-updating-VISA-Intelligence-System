@@ -180,6 +180,109 @@ class TestSeverityClassification:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Run accounting
+# ══════════════════════════════════════════════════════════════════════
+
+class TestRunAccounting:
+    """
+    A run where every URL is blocked must not look successful.
+
+    Regression: `pages_scraped = len(results)` counted failed fetches, so a
+    run where all four URLs returned 403 reported "4 pages scraped" and
+    skipped the non-zero exit.
+    """
+
+    def _blocked(self, url):
+        return {"url": url, "error": "403 Forbidden", "content": None}
+
+    def _ok(self, url):
+        return {"url": url, "content": "Some page text", "content_hash": "h"}
+
+    def test_all_blocked_counts_zero_scraped(self, db):
+        import scripts.daily_update as du
+
+        scraper = MagicMock()
+        scraper.run_daily_scrape.return_value = [
+            self._blocked(f"https://immi.test/{i}") for i in range(4)
+        ]
+
+        with patch.object(du, "DatabaseManager", return_value=db), \
+             patch.object(du, "HomeAffairsScraper", return_value=scraper), \
+             patch.object(du, "reingest_updated_pdfs", return_value=0), \
+             patch.object(du, "ingest_scraped_pages", return_value=0):
+            summary = du.run_daily_update()
+
+        assert summary["pages_scraped"] == 0
+        assert summary["pages_failed"] == 4
+        assert len(summary["errors"]) == 4
+
+    def test_partial_success_is_counted_accurately(self, db):
+        import scripts.daily_update as du
+
+        scraper = MagicMock()
+        scraper.run_daily_scrape.return_value = [
+            self._ok("https://immi.test/a"),
+            self._blocked("https://immi.test/b"),
+            self._ok("https://immi.test/c"),
+        ]
+
+        with patch.object(du, "DatabaseManager", return_value=db), \
+             patch.object(du, "HomeAffairsScraper", return_value=scraper), \
+             patch.object(du, "reingest_updated_pdfs", return_value=0), \
+             patch.object(du, "ingest_scraped_pages", return_value=0):
+            summary = du.run_daily_update()
+
+        assert summary["pages_scraped"] == 2
+        assert summary["pages_failed"] == 1
+
+    def test_main_exits_nonzero_when_nothing_scraped(self):
+        import scripts.daily_update as du
+
+        blocked = {
+            "pages_scraped": 0,
+            "pages_failed": 4,
+            "changes_detected": 0,
+            "chunks_ingested": 0,
+            "alerts_sent": 0,
+            "errors": ["403"] * 4,
+        }
+        with patch.object(du, "run_daily_update", return_value=blocked):
+            with pytest.raises(SystemExit) as exc_info:
+                du.main()
+
+        assert exc_info.value.code == 1
+
+    def test_main_exits_zero_on_a_healthy_run(self):
+        import scripts.daily_update as du
+
+        healthy = {
+            "pages_scraped": 4,
+            "pages_failed": 0,
+            "changes_detected": 1,
+            "chunks_ingested": 12,
+            "alerts_sent": 1,
+            "errors": [],
+        }
+        with patch.object(du, "run_daily_update", return_value=healthy):
+            du.main()  # must not raise SystemExit
+
+
+class TestScraperHeaders:
+    """The WAF rejects requests that don't look like a browser."""
+
+    def test_browser_headers_are_sent(self):
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        with patch("httpx.Client") as mock_client:
+            HomeAffairsScraper()
+
+        headers = mock_client.call_args.kwargs["headers"]
+        assert "Mozilla/5.0" in headers["User-Agent"]
+        assert "text/html" in headers["Accept"]
+        assert "Accept-Language" in headers
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Scraped page ingestion
 # ══════════════════════════════════════════════════════════════════════
 

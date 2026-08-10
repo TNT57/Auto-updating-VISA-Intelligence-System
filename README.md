@@ -168,6 +168,30 @@ To run it yourself:
 > `python scripts/initial_setup.py --rebuild`, otherwise relevance scores will
 > keep reading 0%.
 
+### Troubleshooting the daily scrape
+
+**"Daily Scrape" emails you a failure every day.** Two separate causes, both
+addressed:
+
+1. **`git push` denied to `github-actions[bot]` (exit 128).** This is what
+   actually failed the job. The workflow tried to commit results back to the
+   repo without `permissions: contents: write` — and everything it tried to
+   commit was gitignored anyway. The push step is gone; state is cached instead.
+2. **All four URLs returned `403 Forbidden`.** The Home Affairs WAF rejects
+   requests that don't carry ordinary browser headers, so the scraper fetched
+   nothing on every run. Standard `Accept` / `Accept-Language` headers and a
+   browser `User-Agent` are now sent by default.
+
+The run also used to count blocked pages as "scraped", so it reported
+`Pages scraped: 4` on a run that fetched nothing. It now counts only real
+successes and **exits non-zero if no page was fetched** — a monitoring job
+that silently goes green is worse than one that fails.
+
+If 403s persist after this, the WAF is likely blocking datacenter IPs rather
+than the user agent, and GitHub Actions can't reach the site at all. In that
+case run `python scripts/daily_update.py` on a machine with a residential
+connection (cron or Task Scheduler) instead of relying on the workflow.
+
 ### How the daily update stays stateful
 
 Change detection only works if the previous scrape survives to the next run.

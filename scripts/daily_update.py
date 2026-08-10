@@ -179,6 +179,7 @@ def run_daily_update() -> dict:
     """
     summary = {
         "pages_scraped": 0,
+        "pages_failed": 0,
         "changes_detected": 0,
         "pdfs_downloaded": 0,
         "chunks_ingested": 0,
@@ -203,7 +204,14 @@ def run_daily_update() -> dict:
     logger.info("--- Step 1: Scraping monitored URLs ---")
     try:
         results = scraper.run_daily_scrape()
-        summary["pages_scraped"] = len(results)
+        # Count only pages that actually came back. `results` includes failed
+        # fetches, so using len() here reported "4 pages scraped" on a run
+        # where all four URLs returned 403 — and made the exit check below
+        # think the run had succeeded.
+        summary["pages_scraped"] = sum(
+            1 for r in results if not r.get("error") and r.get("content")
+        )
+        summary["pages_failed"] = len(results) - summary["pages_scraped"]
     except Exception as exc:
         logger.error("Scraping failed: {}", exc)
         summary["errors"].append(f"Scraping: {exc}")
@@ -302,6 +310,7 @@ def main():
     print("📋 Daily Update Summary")
     print("=" * 60)
     print(f"  Pages scraped:    {summary['pages_scraped']}")
+    print(f"  Pages failed:     {summary['pages_failed']}")
     print(f"  Changes detected: {summary['changes_detected']}")
     print(f"  Chunks ingested:  {summary['chunks_ingested']}")
     print(f"  Alerts sent:      {summary['alerts_sent']}")
@@ -311,9 +320,18 @@ def main():
             print(f"    - {err}")
     print()
 
-    # Exit with error code if there were critical failures
-    if summary["errors"] and summary["pages_scraped"] == 0:
+    # Fail loudly when nothing was fetched. A run where every URL is blocked
+    # must not report success — a silently-green daily job is worse than a
+    # failing one, because nobody notices the monitoring has stopped.
+    if summary["pages_scraped"] == 0:
+        print("❌ No pages were scraped successfully — failing the run.")
         sys.exit(1)
+
+    if summary["pages_failed"]:
+        print(
+            f"⚠️  {summary['pages_failed']} of "
+            f"{summary['pages_failed'] + summary['pages_scraped']} URLs failed."
+        )
 
 
 if __name__ == "__main__":

@@ -35,8 +35,21 @@ class HomeAffairsScraper:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pdf_dir.mkdir(parents=True, exist_ok=True)
 
+        # immi.homeaffairs.gov.au sits behind a WAF that returns 403 to
+        # requests missing ordinary browser headers. Sending a normal Accept /
+        # Accept-Language set alongside the configured User-Agent is what makes
+        # these public pages fetchable; the 5s inter-request delay keeps the
+        # load negligible.
         self.client = httpx.Client(
-            headers={"User-Agent": settings.user_agent},
+            headers={
+                "User-Agent": settings.user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;"
+                          "q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-AU,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            },
             timeout=30.0,
             follow_redirects=True,
         )
