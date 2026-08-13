@@ -94,6 +94,16 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, alias="CHUNK_OVERLAP")
 
+    # ---- Retrieval ----
+    # Query expansion strategy: llm | synonyms | none. Measured on the 10
+    # questions in scripts/eval_retrieval.py against a 478-chunk index:
+    #   none      hit@1 60%  hit@3 70%  MRR 0.693
+    #   synonyms  hit@1 60%  hit@3 80%  MRR 0.723
+    #   llm       hit@1 70%  hit@3 90%  MRR 0.808
+    # "llm" costs one extra call per question and falls back to "synonyms"
+    # if the LLM is unavailable.
+    query_expansion: str = Field(default="llm", alias="QUERY_EXPANSION")
+
     # ---- Change detection ----
     # How many page snapshots to retain per URL before pruning. Full page text
     # adds up across daily runs and changes.db is cached between CI runs.
