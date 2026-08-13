@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     )
 
     # ---- Discord Alerts ----
+    # Off by default: the project's focus is the RAG side, and change
+    # notification is parked. The alerting code is intact and tested — flip
+    # this to true (and set DISCORD_WEBHOOK_URL) to switch it back on.
+    alerts_enabled: bool = Field(default=False, alias="ALERTS_ENABLED")
     discord_webhook_url: str = Field(default="", alias="DISCORD_WEBHOOK_URL")
     # Only changes at or above this severity trigger an alert.
     alert_min_severity: str = Field(default="IMPORTANT", alias="ALERT_MIN_SEVERITY")

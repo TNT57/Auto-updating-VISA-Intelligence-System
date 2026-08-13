@@ -275,15 +275,21 @@ def run_daily_update() -> dict:
         logger.error("Page ingestion failed: {}", exc)
         summary["errors"].append(f"Page ingestion: {exc}")
 
-    # Step 4: Send alerts for significant changes
-    logger.info("--- Step 4: Sending alerts ---")
-    try:
-        from src.alerts.alert_manager import AlertManager
+    # Step 4: Send alerts for significant changes.
+    # Disabled by default (ALERTS_ENABLED). Change notification is parked while
+    # the project focuses on the RAG side; detected changes are still recorded
+    # in SQLite and visible on the Changes page, they just aren't pushed out.
+    if not settings.alerts_enabled:
+        logger.info("--- Step 4: Alerts disabled (ALERTS_ENABLED=false) ---")
+    else:
+        logger.info("--- Step 4: Sending alerts ---")
+        try:
+            from src.alerts.alert_manager import AlertManager
 
-        summary["alerts_sent"] = AlertManager(db).send_pending_alerts()
-    except Exception as exc:
-        logger.error("Alerting failed: {}", exc)
-        summary["errors"].append(f"Alerting: {exc}")
+            summary["alerts_sent"] = AlertManager(db).send_pending_alerts()
+        except Exception as exc:
+            logger.error("Alerting failed: {}", exc)
+            summary["errors"].append(f"Alerting: {exc}")
 
     # Summary
     logger.info("=" * 50)

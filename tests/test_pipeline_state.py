@@ -267,6 +267,64 @@ class TestRunAccounting:
             du.main()  # must not raise SystemExit
 
 
+class TestAlertsToggle:
+    """
+    Change notification is parked via ALERTS_ENABLED. Detection must keep
+    working — only the outbound push is switched off.
+    """
+
+    def _scraper_returning(self, content):
+        scraper = MagicMock()
+        scraper.run_daily_scrape.return_value = [
+            {"url": "https://immi.test/fees", "content": content,
+             "content_hash": "h1", "title": "Fees"}
+        ]
+        return scraper
+
+    def _run(self, db, alerts_enabled):
+        import scripts.daily_update as du
+
+        with patch.object(du, "DatabaseManager", return_value=db), \
+             patch.object(du, "HomeAffairsScraper",
+                          return_value=self._scraper_returning("Fee is $2,500.")), \
+             patch.object(du, "reingest_updated_pdfs", return_value=0), \
+             patch.object(du, "ingest_scraped_pages", return_value=0), \
+             patch.object(du.settings, "alerts_enabled", alerts_enabled), \
+             patch("src.alerts.alert_manager.AlertManager.send_pending_alerts",
+                   return_value=3) as mock_send:
+            summary = du.run_daily_update()
+        return summary, mock_send
+
+    def test_alerts_skipped_when_disabled(self, db):
+        summary, mock_send = self._run(db, alerts_enabled=False)
+
+        mock_send.assert_not_called()
+        assert summary["alerts_sent"] == 0
+        assert not summary["errors"]
+
+    def test_alerts_sent_when_enabled(self, db):
+        summary, mock_send = self._run(db, alerts_enabled=True)
+
+        mock_send.assert_called_once()
+        assert summary["alerts_sent"] == 3
+
+    def test_change_detection_still_records_while_alerts_are_off(self, db):
+        """The parked feature must not disable detection itself."""
+        db.save_page_snapshot(
+            url="https://immi.test/fees", content="Fee is $2,235.",
+            content_hash="h0",
+        )
+        summary, _ = self._run(db, alerts_enabled=False)
+
+        assert summary["changes_detected"] > 0
+        assert len(db.get_recent_changes(limit=10)) > 0
+
+    def test_alerts_default_to_off(self):
+        from src.utils.config import Settings
+
+        assert Settings().alerts_enabled is False
+
+
 class TestScraperHeaders:
     """The WAF rejects requests that don't look like a browser."""
 

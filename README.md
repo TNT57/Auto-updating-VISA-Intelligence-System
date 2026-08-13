@@ -15,7 +15,7 @@ This system monitors the Australian Department of Home Affairs website for chang
 | **AI-Powered Chat** | Uses `Groq` (Llama 3.3 70B) to generate grounded answers, then re-checks each answer against its sources |
 | **Web Scraping & Monitoring** | Scrapes the Home Affairs website on a schedule via `BeautifulSoup`, detects content changes |
 | **Change Detection** | Stores page snapshots in `SQLite` and diffs them to flag policy updates, with LLM severity classification |
-| **Alerts** | Sends Discord webhook notifications for changes at or above a configurable severity |
+| **Alerts** | Discord webhook notifications for changes at or above a configurable severity. *Currently parked — see Project Status* |
 | **Dashboard** | `Streamlit` multi-page app with chat, change log, and alert status |
 | **Automated Pipeline** | GitHub Actions workflow runs daily scraping, change detection, re-ingestion, and alerting |
 
@@ -151,7 +151,7 @@ Cache directories are configured in two places so they always point inside the p
 | Streamlit dashboard | ✅ Working | Chat and Changes pages |
 | Web scraper | ✅ Working | 4 monitored URLs, conditional GET for PDFs |
 | Change detection | ✅ Working | Snapshots persist in SQLite |
-| Alert system (Discord) | ✅ Working | Set `DISCORD_WEBHOOK_URL` to enable |
+| Alert system (Discord) | ⏸️ Built, parked | Working and tested, but off by default — set `ALERTS_ENABLED=true` |
 | Email alerts | ❌ Not implemented | SMTP settings exist in config but are unused |
 | Alerts config page | ⚠️ Read-only | Shows status; configure via `.env`, not the UI |
 | GitHub Actions daily scrape | ✅ Configured | State cached between runs |

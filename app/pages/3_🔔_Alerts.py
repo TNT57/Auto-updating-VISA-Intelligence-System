@@ -28,24 +28,32 @@ st.markdown("Discord notifications for detected 485 visa policy changes.")
 # ---- Current status ----
 webhook_configured = bool(settings.discord_webhook_url)
 
+if not settings.alerts_enabled:
+    st.info(
+        "⏸️ **Change notification is currently parked.** Changes are still "
+        "detected and recorded — see the Changes page — they just aren't "
+        "pushed anywhere. The alerting code is intact and tested."
+    )
+
 col1, col2 = st.columns(2)
 with col1:
-    if webhook_configured:
+    if not settings.alerts_enabled:
+        st.warning("⏸️ Alerts disabled")
+    elif webhook_configured:
         st.success("✅ Discord webhook configured")
     else:
-        st.warning("⚠️ No Discord webhook configured")
+        st.warning("⚠️ Enabled, but no webhook URL set")
 with col2:
     st.info(f"📊 Minimum severity: **{settings.alert_min_severity.upper()}**")
 
-if not webhook_configured:
+if not settings.alerts_enabled or not webhook_configured:
     st.markdown(
-        "To enable alerts, add a webhook URL to your `.env` file:\n\n"
+        "To turn alerts back on, set both of these in your `.env` file:\n\n"
         "```bash\n"
+        "ALERTS_ENABLED=true\n"
         "DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...\n"
         "ALERT_MIN_SEVERITY=IMPORTANT  # CRITICAL | IMPORTANT | MINOR\n"
-        "```\n\n"
-        "For the scheduled GitHub Actions run, add the same value as a "
-        "repository secret named `DISCORD_WEBHOOK_URL`."
+        "```"
     )
 
 st.divider()
