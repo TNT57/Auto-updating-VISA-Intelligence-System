@@ -2,6 +2,11 @@
 .env
 .env.local
 *.env
+# .env.bak and friends: "*.env" does not match ".env.bak", so a backup of a
+# secrets file would otherwise be committable.
+*.bak
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -30,6 +35,8 @@ env/
 
 # Data files (large/binary)
 data/raw/pdfs/*.pdf
+# Conditional-GET markers written alongside each downloaded PDF
+data/raw/pdfs/*.etag
 data/raw/html_snapshots/
 data/raw/*.txt
 data/raw/*.html

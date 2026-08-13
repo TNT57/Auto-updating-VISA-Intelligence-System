@@ -194,16 +194,23 @@ class HomeAffairsScraper:
             return h1.get_text(strip=True)
         return ""
 
+    # A container has to hold at least this much text to be believed. Without
+    # a floor, an empty-but-present <main> wins and extraction silently returns
+    # "" — which is exactly what an unrendered JS page looks like.
+    MIN_CONTENT_CHARS = 200
+
     @staticmethod
     def _extract_content(soup: BeautifulSoup) -> str:
         """
         Extract and normalise the main content area.
 
-        Tries common Home Affairs content selectors, then falls back
-        to <main> or <body> with navigation / footer stripped.
+        Tries known Home Affairs content containers in order, skipping any that
+        match but are empty, and falls back to <body> stripped of chrome.
         """
-        # Try known content containers (Home Affairs uses these)
+        best = ""
+
         for selector in (
+            "div#contentBox",       # current Home Affairs main content wrapper
             "div.region-content",
             "div#content",
             "div.main-content",
@@ -211,11 +218,22 @@ class HomeAffairsScraper:
             "article",
         ):
             container = soup.select_one(selector)
-            if container:
-                # Remove nav, footer, sidebar noise
-                for tag in container.select("nav, footer, .sidebar, .breadcrumb, .menu"):
-                    tag.decompose()
-                return container.get_text(separator="\n", strip=True)
+            if not container:
+                continue
+
+            # Remove nav, footer, sidebar noise
+            for tag in container.select("nav, footer, .sidebar, .breadcrumb, .menu"):
+                tag.decompose()
+
+            text = container.get_text(separator="\n", strip=True)
+            if len(text) >= HomeAffairsScraper.MIN_CONTENT_CHARS:
+                return text
+            # Matched but thin — keep the best candidate and keep looking.
+            if len(text) > len(best):
+                best = text
+
+        if best:
+            return best
 
         # Fallback: entire body, stripped of chaff
         body = soup.find("body")

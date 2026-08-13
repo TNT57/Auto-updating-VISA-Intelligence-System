@@ -58,22 +58,29 @@ class Settings(BaseSettings):
     # Fetch backend: auto | httpx | scrapling. "auto" prefers scrapling when
     # installed. See src/scraping/fetchers.py.
     scraper_backend: str = Field(default="auto", alias="SCRAPER_BACKEND")
+    # The WAF 403s any User-Agent containing "Bot" or "Crawler" — verified by
+    # trial on 2026-08-13. The original "Visa485IntelligenceBot/1.0" was the
+    # sole cause of four months of failed scheduled runs. This identifies the
+    # client honestly, with a contact URL, without tripping that filter.
     user_agent: str = Field(
         default=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            "Visa485Intelligence/1.0 "
+            "(+https://github.com/TNT57/Auto-updating-VISA-Intelligence-System)"
         ),
         alias="USER_AGENT",
     )
 
     # ---- Monitored URLs ----
-    # Key Home Affairs pages for the 485 visa
+    # Verified live 2026-08-13. The previous list pointed at
+    # documents-you-need, visa-fees and global-processing-times, all of which
+    # now 404 — Home Affairs restructured the 485 content into three stream
+    # sub-pages. Re-check these if fetches start coming back 404.
     monitored_urls: list[str] = Field(
         default=[
             "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485",
-            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/documents-you-need",
-            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-processing-times/global-processing-times",
-            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/visa-fees",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/post-higher-education-work",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/post-vocational-education-work",
+            "https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/second-post-higher-education-work",
         ],
         alias="MONITORED_URLS",
     )

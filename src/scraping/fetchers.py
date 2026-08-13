@@ -20,6 +20,8 @@ which prefers Scrapling when it is installed and falls back to httpx).
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 from loguru import logger
 
@@ -144,6 +146,79 @@ class ScraplingFetcher(BaseFetcher):
         return FetchResult(url=url, html=str(html), status_code=status)
 
 
+class BrowserFetcher(BaseFetcher):
+    """
+    Render the page in a real browser via Scrapling's DynamicFetcher
+    (Playwright Chromium).
+
+    immi.homeaffairs.gov.au builds its visa content client-side: a plain HTTP
+    fetch of the 485 page returns 1.2MB of HTML containing ~1,400 characters of
+    text, all navigation and footer, with the body reading "Loading". Rendering
+    it yields ~8,000 characters of real content and 4x the links. So for this
+    site a browser is not optional — the HTTP backends return a page that looks
+    successful and is empty.
+
+    Costs roughly ten seconds and a Chromium process per page, which is why it
+    is not used for anything that a plain fetch can handle.
+    """
+
+    name = "browser"
+
+    def __init__(self, timeout: float = 90.0):
+        from scrapling.fetchers import DynamicFetcher
+
+        self._fetcher = DynamicFetcher
+        self.timeout = timeout
+
+    def fetch(self, url: str) -> FetchResult:
+        try:
+            page = self._fetcher.fetch(
+                url,
+                headless=True,
+                # Wait for in-flight XHR to settle, otherwise the content
+                # containers are still empty when the HTML is captured.
+                network_idle=True,
+                timeout=int(self.timeout * 1000),  # Playwright wants ms
+            )
+        except Exception as exc:
+            return FetchResult(url=url, error=f"{type(exc).__name__}: {exc}")
+
+        status = getattr(page, "status", None)
+        if status is not None and status >= 400:
+            return FetchResult(
+                url=url, status_code=status, error=f"HTTP {status} for {url}"
+            )
+
+        html = getattr(page, "html_content", None)
+        if html is None:
+            return FetchResult(url=url, status_code=status,
+                               error="Browser returned no HTML")
+
+        return FetchResult(url=url, html=str(html), status_code=status or 200)
+
+
+@lru_cache(maxsize=1)
+def _browser_available() -> bool:
+    """
+    True when both DynamicFetcher and a Chromium binary are present.
+
+    Cached: the probe starts a Playwright driver process, so calling it per
+    fetcher construction is both slow and noisy at interpreter shutdown.
+    """
+    try:
+        from scrapling.fetchers import DynamicFetcher  # noqa: F401
+    except ImportError:
+        return False
+
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            return Path(p.chromium.executable_path).exists()
+    except Exception:
+        return False
+
+
 def available_backends() -> list[str]:
     """Backends that can actually be constructed in this environment."""
     backends = ["httpx"]
@@ -153,6 +228,8 @@ def available_backends() -> list[str]:
         backends.append("scrapling")
     except ImportError:
         pass
+    if _browser_available():
+        backends.append("browser")
     return backends
 
 
@@ -160,26 +237,42 @@ def get_fetcher(backend: str | None = None, timeout: float = 30.0) -> BaseFetche
     """
     Build a fetcher for the requested backend.
 
-    "auto" prefers Scrapling when installed, else httpx. An explicitly named
-    backend that is unavailable falls back to httpx with a warning rather than
-    failing the run — a degraded fetch beats no fetch.
+    "auto" prefers the browser, because the target site renders its content
+    with JavaScript and the HTTP backends return a page that looks successful
+    but is empty. It falls back to scrapling, then httpx, so a missing Chromium
+    degrades the run rather than failing it — but the caller is warned loudly,
+    since a degraded fetch here means empty pages, not merely slower ones.
     """
     backend = (backend or settings.scraper_backend or "auto").lower()
+    available = available_backends()
 
     if backend == "auto":
-        backend = "scrapling" if "scrapling" in available_backends() else "httpx"
+        for candidate in ("browser", "scrapling", "httpx"):
+            if candidate in available:
+                backend = candidate
+                break
+
+    if backend == "browser":
+        if "browser" in available:
+            logger.info("Fetch backend: browser (Playwright — renders JS)")
+            return BrowserFetcher(timeout=max(timeout, 90.0))
+        logger.warning(
+            "SCRAPER_BACKEND=browser but no Chromium binary was found. "
+            "Run: python -m playwright install chromium\n"
+            "Falling back — note this site is JS-rendered, so the fallback "
+            "will fetch pages successfully but extract almost no text."
+        )
+        backend = "scrapling" if "scrapling" in available else "httpx"
 
     if backend == "scrapling":
-        try:
-            fetcher = ScraplingFetcher(timeout=timeout)
+        if "scrapling" in available:
             logger.info("Fetch backend: scrapling (browser impersonation)")
-            return fetcher
-        except ImportError:
-            logger.warning(
-                "SCRAPER_BACKEND=scrapling but scrapling is not installed "
-                "(pip install 'scrapling[fetchers]') — falling back to httpx"
-            )
-            backend = "httpx"
+            return ScraplingFetcher(timeout=timeout)
+        logger.warning(
+            "SCRAPER_BACKEND=scrapling but scrapling is not installed "
+            "(pip install 'scrapling[fetchers]') — falling back to httpx"
+        )
+        backend = "httpx"
 
     if backend != "httpx":
         logger.warning("Unknown SCRAPER_BACKEND '{}' — using httpx", backend)

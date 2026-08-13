@@ -23,7 +23,20 @@ sys.path.insert(0, str(PROJECT_ROOT))
 class TestBackendSelection:
     """SCRAPER_BACKEND resolution, including graceful degradation."""
 
-    def test_auto_prefers_scrapling_when_available(self):
+    def test_auto_prefers_browser(self):
+        """
+        The target site renders content with JavaScript, so the HTTP backends
+        return pages that look fine and hold no text. Browser must win.
+        """
+        from src.scraping import fetchers
+
+        with patch.object(fetchers, "available_backends",
+                          return_value=["httpx", "scrapling", "browser"]):
+            fetcher = fetchers.get_fetcher("auto")
+
+        assert fetcher.name == "browser"
+
+    def test_auto_prefers_scrapling_when_no_browser(self):
         from src.scraping import fetchers
 
         with patch.object(fetchers, "available_backends",
@@ -32,7 +45,7 @@ class TestBackendSelection:
 
         assert fetcher.name == "scrapling"
 
-    def test_auto_falls_back_to_httpx_when_scrapling_missing(self):
+    def test_auto_falls_back_to_httpx_when_nothing_else(self):
         from src.scraping import fetchers
 
         with patch.object(fetchers, "available_backends", return_value=["httpx"]):
@@ -52,11 +65,20 @@ class TestBackendSelection:
         """A degraded fetch beats no fetch — never fail the run over a backend."""
         from src.scraping import fetchers
 
-        with patch.object(fetchers, "ScraplingFetcher", side_effect=ImportError):
+        with patch.object(fetchers, "available_backends", return_value=["httpx"]):
             fetcher = fetchers.get_fetcher("scrapling")
 
         assert fetcher.name == "httpx"
         fetcher.close()
+
+    def test_missing_browser_degrades_to_scrapling(self):
+        from src.scraping import fetchers
+
+        with patch.object(fetchers, "available_backends",
+                          return_value=["httpx", "scrapling"]):
+            fetcher = fetchers.get_fetcher("browser")
+
+        assert fetcher.name == "scrapling"
 
     def test_unknown_backend_falls_back_to_httpx(self):
         from src.scraping.fetchers import get_fetcher
@@ -249,6 +271,40 @@ class TestScraperUsesFetcher:
         assert result["content_hash"]
         assert Path(result["snapshot_path"]).exists()
 
+    def test_empty_container_does_not_win_extraction(self, tmp_path):
+        """
+        Regression: the selector loop returned on the first *matching*
+        container even when it held no text. On the JS-rendered Home Affairs
+        page <main> matches but is empty until scripts run, so a 200 response
+        silently extracted 0 characters and the page counted as fetched-but-
+        blank. Keep looking past thin matches.
+        """
+        from bs4 import BeautifulSoup
+
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        real = "Eligibility details. " * 40
+        html = f"<html><body><main></main><article>{real}</article></body></html>"
+
+        text = HomeAffairsScraper._extract_content(BeautifulSoup(html, "lxml"))
+
+        assert len(text) > HomeAffairsScraper.MIN_CONTENT_CHARS
+        assert "Eligibility details" in text
+
+    def test_content_box_is_preferred(self, tmp_path):
+        from bs4 import BeautifulSoup
+
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        wanted = "The visa costs AUD5,750.00. " * 20
+        other = "Sidebar filler. " * 20
+        html = (f'<html><body><div id="contentBox">{wanted}</div>'
+                f"<article>{other}</article></body></html>")
+
+        text = HomeAffairsScraper._extract_content(BeautifulSoup(html, "lxml"))
+
+        assert "AUD5,750.00" in text
+
     def test_scraper_defaults_to_configured_backend(self, tmp_path):
         """No injected fetcher means the factory decides."""
         from src.scraping.homeaffairs_scraper import HomeAffairsScraper
@@ -257,4 +313,4 @@ class TestScraperUsesFetcher:
             output_dir=tmp_path / "html", pdf_dir=tmp_path / "pdfs", delay=0
         )
 
-        assert scraper.fetcher.name in ("httpx", "scrapling")
+        assert scraper.fetcher.name in ("httpx", "scrapling", "browser")

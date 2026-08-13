@@ -325,19 +325,46 @@ class TestAlertsToggle:
         assert Settings().alerts_enabled is False
 
 
-class TestScraperHeaders:
-    """The WAF rejects requests that don't look like a browser."""
+class TestUserAgent:
+    """
+    The WAF returns 403 for any User-Agent containing "Bot" or "Crawler".
+    That single rule — not headers, not the source IP — caused four months of
+    failed scheduled runs. Verified by trial against the live site 2026-08-13:
+    "Visa485IntelligenceBot/1.0" and "MyCrawler/1.0" both 403 on every attempt,
+    while "VisaWatch/1.0", curl and python-httpx all return 200.
+    """
 
-    def test_browser_headers_are_sent(self):
+    FORBIDDEN = ("bot", "crawler", "spider", "scraper")
+
+    def test_default_user_agent_avoids_blocked_keywords(self):
+        from src.utils.config import Settings
+
+        ua = Settings().user_agent.lower()
+        for word in self.FORBIDDEN:
+            assert word not in ua, (
+                f"default User-Agent contains {word!r}; the Home Affairs WAF "
+                f"returns 403 for those. Got: {ua}"
+            )
+
+    def test_default_user_agent_still_identifies_the_client(self):
+        """Dodging the keyword filter must not mean impersonating a browser."""
+        from src.utils.config import Settings
+
+        ua = Settings().user_agent
+        assert "Visa485Intelligence" in ua
+        assert "github.com" in ua
+        assert "Mozilla" not in ua
+
+    def test_standard_headers_are_sent(self):
         from src.scraping.homeaffairs_scraper import HomeAffairsScraper
 
         with patch("httpx.Client") as mock_client:
-            HomeAffairsScraper()
+            HomeAffairsScraper(fetcher=MagicMock(name="fetcher"))
 
         headers = mock_client.call_args.kwargs["headers"]
-        assert "Mozilla/5.0" in headers["User-Agent"]
         assert "text/html" in headers["Accept"]
         assert "Accept-Language" in headers
+        assert headers["User-Agent"]
 
 
 # ══════════════════════════════════════════════════════════════════════
