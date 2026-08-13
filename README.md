@@ -112,16 +112,34 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and add your GROQ_API_KEY
 
-# 6. Add visa PDF documents
-# Download from: https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485
-# Place them in: data/raw/pdfs/
+# 6. Fetch the real content from the Home Affairs site and index it
+python scripts/fetch_and_index.py --crawl
 
-# 7. Run the setup script (creates directories, builds vector DB, runs test query)
-python scripts/initial_setup.py
-
-# 8. Launch the dashboard
+# 7. Launch the dashboard
 streamlit run app/streamlit_app.py
 ```
+
+### Building the knowledge base
+
+`scripts/fetch_and_index.py` is what puts real content behind the chat. It
+fetches the monitored pages, optionally follows links within the 485 section,
+downloads any linked PDFs, and indexes all of it into ChromaDB.
+
+```bash
+python scripts/fetch_and_index.py                 # configured URLs + their PDFs
+python scripts/fetch_and_index.py --crawl         # also follow in-section links
+python scripts/fetch_and_index.py --dry-run       # show what it would fetch
+python scripts/fetch_and_index.py --ask "What is the English requirement?"
+```
+
+Run it from a machine whose IP the site does not block — a home connection.
+GitHub Actions runners are refused (see Troubleshooting). The crawl is bounded:
+same host only, restricted to the 485 URL prefix, capped by `--max-pages`
+(default 25), and it honours `robots.txt` and `SCRAPING_DELAY`.
+
+Without this step the vector store only contains whatever PDFs you placed in
+`data/raw/pdfs/` by hand, so the chat cannot answer from the live site.
+`scripts/initial_setup.py` still exists for the PDFs-only path.
 
 ### Where Files Live (Cache & Storage)
 
@@ -244,6 +262,7 @@ under `data/raw/html_snapshots/` are a local archive, not the source of truth.
 │   ├── alerts/                 # Notification manager
 │   └── utils/                  # Config, logging, database
 ├── scripts/
+│   ├── fetch_and_index.py      # Fetch the live site + PDFs → index for RAG
 │   ├── initial_setup.py        # First-time setup (--rebuild to reset the vector DB)
 │   └── daily_update.py         # Scrape → detect changes → re-ingest → alert
 ├── .github/workflows/

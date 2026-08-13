@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
 
+from src.ingestion.pipeline import ingest_pages, ingest_pdfs
 from src.monitoring.change_detector import ChangeDetector
 from src.scraping.homeaffairs_scraper import HomeAffairsScraper
 from src.utils.config import ensure_directories, settings
@@ -54,121 +55,10 @@ def load_previous_content(url: str, db: DatabaseManager) -> str | None:
     return snapshot["content"]
 
 
-def reingest_updated_pdfs(db: DatabaseManager) -> int:
-    """
-    Check for new/updated PDFs and re-ingest them into ChromaDB.
-
-    Returns the number of chunks added.
-    """
-    from src.ingestion.pdf_loader import PDFLoader
-    from src.ingestion.text_chunker import TextChunker
-    from src.ingestion.vectorstore_manager import VectorStoreManager
-
-    pdf_dir = settings.raw_pdf_dir
-    if not pdf_dir.exists():
-        return 0
-
-    loader = PDFLoader(pdf_dir)
-    pdfs = loader.list_pdfs()
-    if not pdfs:
-        return 0
-
-    total_chunks = 0
-    chunker = TextChunker()
-    vs = VectorStoreManager()
-
-    for pdf_path in pdfs:
-        file_hash = loader.compute_file_hash(pdf_path)
-
-        # Check if this PDF has already been ingested with the same hash
-        with db.get_session() as session:
-            from src.utils.db_manager import Document
-            existing = (
-                session.query(Document)
-                .filter(Document.file_path == str(pdf_path))
-                .first()
-            )
-            if existing and existing.file_hash == file_hash:
-                logger.debug("PDF unchanged, skipping: {}", pdf_path.name)
-                continue
-
-        # New or updated PDF — ingest it
-        logger.info("Ingesting PDF: {}", pdf_path.name)
-        pages = loader.load_pdf(pdf_path)
-        if not pages:
-            continue
-
-        chunks = chunker.chunk_document(pages)
-        vs.add_chunks(chunks)
-
-        # Record in database
-        db.add_document(
-            file_path=str(pdf_path),
-            file_hash=file_hash,
-            source_url=None,
-        )
-        total_chunks += len(chunks)
-        logger.info("Ingested {} chunks from {}", len(chunks), pdf_path.name)
-
-    return total_chunks
-
-
-def ingest_scraped_pages(results: list[dict]) -> int:
-    """
-    Embed the scraped page text into ChromaDB.
-
-    Without this the chat interface can only answer from PDFs, so the pages
-    being monitored — processing times and fees among them — are invisible to
-    it. Each URL's chunks are deleted before re-adding so stale page content
-    doesn't accumulate across runs.
-
-    Returns the number of chunks added.
-    """
-    from src.ingestion.pdf_loader import DocumentChunk
-    from src.ingestion.text_chunker import TextChunker
-    from src.ingestion.vectorstore_manager import VectorStoreManager
-
-    pages = [
-        r for r in results
-        if not r.get("error") and (r.get("content") or "").strip()
-    ]
-    if not pages:
-        return 0
-
-    chunker = TextChunker()
-    vs = VectorStoreManager()
-    total_chunks = 0
-
-    for result in pages:
-        url = result["url"]
-        # `source` doubles as the citation label and the delete key, so it has
-        # to be stable across runs — the page title is not.
-        page = DocumentChunk(
-            content=result["content"],
-            source=url,
-            page_number=1,
-            chunk_index=0,
-            doc_type="webpage",
-            metadata={
-                "title": result.get("title") or "",
-                "content_hash": result.get("content_hash") or "",
-                "scraped_at": result.get("timestamp") or "",
-            },
-        )
-
-        chunks = chunker.chunk_document([page])
-        if not chunks:
-            continue
-
-        # Replace rather than upsert: the new scrape may produce fewer chunks
-        # than the last one, and the leftovers would otherwise linger.
-        vs.delete_document(url)
-        vs.add_chunks(chunks)
-
-        total_chunks += len(chunks)
-        logger.info("Ingested {} chunks from page {}", len(chunks), url)
-
-    return total_chunks
+# Ingestion lives in src/ingestion/pipeline.py so this script and
+# fetch_and_index.py cannot drift apart. Aliased to the historical names.
+reingest_updated_pdfs = ingest_pdfs
+ingest_scraped_pages = ingest_pages
 
 
 def run_daily_update() -> dict:
