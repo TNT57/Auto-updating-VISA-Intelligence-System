@@ -51,8 +51,9 @@ class Settings(BaseSettings):
 
     # ---- Scraping Configuration ----
     scraping_delay: int = Field(default=5, alias="SCRAPING_DELAY")
-    # The site's WAF returns 403 to unrecognised agent strings, which is why
-    # every scheduled run failed to fetch anything. Override via USER_AGENT.
+    # Fetch backend: auto | httpx | scrapling. "auto" prefers scrapling when
+    # installed. See src/scraping/fetchers.py.
+    scraper_backend: str = Field(default="auto", alias="SCRAPER_BACKEND")
     user_agent: str = Field(
         default=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

@@ -15,6 +15,7 @@ import httpx
 from bs4 import BeautifulSoup
 from loguru import logger
 
+from src.scraping.fetchers import DEFAULT_HEADERS, BaseFetcher, get_fetcher
 from src.utils.config import settings
 
 
@@ -26,6 +27,7 @@ class HomeAffairsScraper:
         output_dir: Path | None = None,
         pdf_dir: Path | None = None,
         delay: int | None = None,
+        fetcher: BaseFetcher | None = None,
     ):
         self.output_dir = output_dir or settings.raw_html_dir
         self.pdf_dir = pdf_dir or settings.raw_pdf_dir
@@ -35,26 +37,20 @@ class HomeAffairsScraper:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pdf_dir.mkdir(parents=True, exist_ok=True)
 
-        # immi.homeaffairs.gov.au sits behind a WAF that returns 403 to
-        # requests missing ordinary browser headers. Sending a normal Accept /
-        # Accept-Language set alongside the configured User-Agent is what makes
-        # these public pages fetchable; the 5s inter-request delay keeps the
-        # load negligible.
+        # Page fetches go through a pluggable backend (see fetchers.py) so the
+        # strategy can change without touching the scraper.
+        self.fetcher = fetcher or get_fetcher(timeout=30.0)
+
+        # PDF downloads stay on httpx: they need raw bytes and conditional-GET
+        # via ETag, which the HTML-oriented fetcher interface does not cover.
         self.client = httpx.Client(
-            headers={
-                "User-Agent": settings.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;"
-                          "q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-AU,en;q=0.9",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-            },
+            headers={"User-Agent": settings.user_agent, **DEFAULT_HEADERS},
             timeout=30.0,
             follow_redirects=True,
         )
         logger.info(
-            "Scraper initialized — delay: {}s, output: {}",
+            "Scraper initialized — backend: {}, delay: {}s, output: {}",
+            self.fetcher.name,
             self.delay,
             self.output_dir,
         )
@@ -72,11 +68,10 @@ class HomeAffairsScraper:
             content_hash, snapshot_path, status_code, timestamp
         """
         logger.info("Scraping: {}", url)
-        try:
-            resp = self.client.get(url)
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            logger.error("Failed to fetch {}: {}", url, exc)
+        result = self.fetcher.fetch(url)
+
+        if not result.ok:
+            logger.error("Failed to fetch {}: {}", url, result.error)
             return {
                 "url": url,
                 "title": None,
@@ -84,12 +79,12 @@ class HomeAffairsScraper:
                 "html": None,
                 "content_hash": None,
                 "snapshot_path": None,
-                "status_code": None,
+                "status_code": result.status_code,
                 "timestamp": datetime.utcnow().isoformat(),
-                "error": str(exc),
+                "error": result.error,
             }
 
-        html = resp.text
+        html = result.html
         soup = BeautifulSoup(html, "lxml")
 
         # Extract and normalise main content
@@ -106,7 +101,7 @@ class HomeAffairsScraper:
             "html": html,
             "content_hash": content_hash,
             "snapshot_path": str(snapshot_path),
-            "status_code": resp.status_code,
+            "status_code": result.status_code,
             "timestamp": datetime.utcnow().isoformat(),
         }
         logger.info(

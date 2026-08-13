@@ -29,6 +29,10 @@ plotly>=5.18.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 httpx>=0.27.0
+# Browser-impersonating fetch backend (src/scraping/fetchers.py). The
+# [fetchers] extra pulls in curl_cffi, which the base package omits.
+# Optional: the scraper falls back to httpx if this is not installed.
+scrapling[fetchers]>=0.4.14
 
 # ---- Configuration ----
 python-dotenv>=1.0.0

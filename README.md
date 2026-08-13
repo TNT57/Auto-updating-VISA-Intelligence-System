@@ -170,27 +170,53 @@ To run it yourself:
 
 ### Troubleshooting the daily scrape
 
-**"Daily Scrape" emails you a failure every day.** Two separate causes, both
-addressed:
+**"Daily Scrape" emails you a failure every day.** Two separate causes:
 
 1. **`git push` denied to `github-actions[bot]` (exit 128).** This is what
    actually failed the job. The workflow tried to commit results back to the
    repo without `permissions: contents: write` — and everything it tried to
-   commit was gitignored anyway. The push step is gone; state is cached instead.
-2. **All four URLs returned `403 Forbidden`.** The Home Affairs WAF rejects
-   requests that don't carry ordinary browser headers, so the scraper fetched
-   nothing on every run. Standard `Accept` / `Accept-Language` headers and a
-   browser `User-Agent` are now sent by default.
+   commit was gitignored anyway. **Fixed:** the push step is gone; state is
+   cached instead.
+2. **All four URLs returned `403 Forbidden`** on the runner. **Not fixed, and
+   not fixable from GitHub Actions** — see below.
 
 The run also used to count blocked pages as "scraped", so it reported
 `Pages scraped: 4` on a run that fetched nothing. It now counts only real
 successes and **exits non-zero if no page was fetched** — a monitoring job
 that silently goes green is worse than one that fails.
 
-If 403s persist after this, the WAF is likely blocking datacenter IPs rather
-than the user agent, and GitHub Actions can't reach the site at all. In that
-case run `python scripts/daily_update.py` on a machine with a residential
-connection (cron or Task Scheduler) instead of relying on the workflow.
+### The 403 is an IP block, not a header problem
+
+A bare `curl` with no special headers succeeds from a residential connection
+but the same request 403s from a GitHub Actions runner. That rules out user
+agent and header fingerprinting: the site is refusing the runner's **network**,
+whether by datacenter IP range or geography.
+
+Consequences:
+
+- No fetch backend fixes this on GitHub Actions. `scrapling` changes the TLS
+  fingerprint, not the source IP.
+- **Run the pipeline where the IP is not blocked.** On Windows, Task Scheduler
+  running `python scripts/daily_update.py` daily; on macOS/Linux, cron. The
+  scheduled workflow is best treated as disabled until then.
+- If CI-based scraping is genuinely needed later, the fix is a fetch that
+  *originates elsewhere* — a hosted scraping API or an egress proxy. The
+  `BaseFetcher` interface in `src/scraping/fetchers.py` exists so that can be
+  added without touching the scraper or the pipeline.
+
+### Fetch backends
+
+`SCRAPER_BACKEND` selects how pages are fetched:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Use `scrapling` if installed, else `httpx` |
+| `httpx` | Plain HTTP. Sufficient from an unblocked IP |
+| `scrapling` | Browser TLS impersonation via curl_cffi, for stricter fingerprint checks |
+
+An unavailable or misspelled backend falls back to `httpx` with a warning
+rather than failing the run. Scrapling is optional — if it isn't installed,
+everything still works.
 
 ### How the daily update stays stateful
 
