@@ -189,8 +189,21 @@ class LLMClient:
             Tuple of (verdict, explanation) where verdict is one of:
             "GROUNDED", "PARTIALLY_GROUNDED", "UNGROUNDED"
         """
+        # The checker must see everything the answer was written from. This
+        # was truncated to 3,000 characters, and a 5-chunk context runs to
+        # ~5,500 — so a correct answer citing the later chunks was reported
+        # PARTIALLY_GROUNDED because the evidence had been cut off. A false
+        # "unsupported" on the one safety mechanism is worse than the tokens.
+        # 40,000 characters is roughly 10k tokens, comfortably inside the
+        # model's window while still bounding a pathological context.
+        MAX_GROUNDING_CHARS = 40_000
+        if len(context) > MAX_GROUNDING_CHARS:
+            logger.warning(
+                "Grounding context truncated {} -> {} chars; verdict may be "
+                "conservative", len(context), MAX_GROUNDING_CHARS,
+            )
         prompt = GROUNDING_PROMPT.format(
-            context=context[:3000],  # Truncate to avoid token limits
+            context=context[:MAX_GROUNDING_CHARS],
             answer=answer,
         )
         try:

@@ -23,6 +23,17 @@ class RetrievalResult:
     doc_type: str
     metadata: dict = field(default_factory=dict)
 
+    # URL slug -> the stream name Home Affairs uses on the page.
+    STREAM_NAMES = {
+        "post-higher-education-work": "Post-Higher Education Work stream",
+        "post-vocational-education-work": "Post-Vocational Education Work stream",
+        "second-post-higher-education-work":
+            "Second Post-Higher Education Work stream",
+        "second-post-study-work": "Second Post-Study Work stream",
+        "graduate-work": "Graduate Work stream",
+        "replacement": "Replacement stream",
+    }
+
     @property
     def relevance_score(self) -> float:
         """
@@ -34,6 +45,23 @@ class RetrievalResult:
         is ever queried.
         """
         return max(0.0, min(1.0, 1.0 - self.distance))
+
+    @property
+    def stream(self) -> str | None:
+        """
+        Which 485 stream this passage describes, from its URL.
+
+        The answer to "how much does it cost" is AUD5,750 or AUD2,265
+        depending on the stream, and both figures are in the corpus. Without
+        a label the model sees two numbers and picks one. Naming the stream
+        lets it give the breakdown instead.
+        """
+        # Longest slug first: "second-post-higher-education-work" contains
+        # "post-higher-education-work" as a substring.
+        for slug in sorted(self.STREAM_NAMES, key=len, reverse=True):
+            if slug in self.source:
+                return self.STREAM_NAMES[slug]
+        return None
 
 
 @dataclass
@@ -51,11 +79,23 @@ class QueryResults:
         context_parts = []
         for i, r in enumerate(self.results, 1):
             source_info = f"Source: {r.source}, Page {r.page_number}"
+            # Naming the stream up front is what lets the model answer
+            # "AUD5,750 for X, AUD2,265 for Y" instead of picking one.
+            if r.stream:
+                source_info = f"Stream: {r.stream}\n{source_info}"
             context_parts.append(
                 f"[{i}] {source_info}\n{r.content}"
             )
 
         return "\n\n---\n\n".join(context_parts)
+
+    def streams_present(self) -> list[str]:
+        """Distinct streams represented in these results, in rank order."""
+        seen: list[str] = []
+        for r in self.results:
+            if r.stream and r.stream not in seen:
+                seen.append(r.stream)
+        return seen
 
     def get_sources(self) -> list[dict]:
         """Get unique source citations with excerpt text."""

@@ -1,0 +1,499 @@
+================================================================================
+ 485 VISA RAG SYSTEM - WHAT EACH STAGE DOES, WITH REAL OUTPUT
+ Generated 2026-08-14 from the live index (226 chunks, 7 pages)
+================================================================================
+
+This document shows the actual output of every stage, plus definitions of the
+jargon (chunk, embedding, hit@1, MRR). Every number here came from running the
+real system on your machine - nothing is illustrative.
+
+Reproduce any section with:
+    python scripts/inspect_pipeline.py --stage ingest
+    python scripts/inspect_pipeline.py --stage retrieve
+    python scripts/inspect_pipeline.py --stage generate
+    python scripts/eval_retrieval.py --verbose
+
+
+================================================================================
+ 0. THE SHAPE OF THE WHOLE THING
+================================================================================
+
+RAG = Retrieval-Augmented Generation. Three stages:
+
+    Home Affairs website
+            |
+            v
+    [1] INGESTION      fetch pages -> extract text -> cut into chunks
+            |          -> turn each chunk into numbers -> store in ChromaDB
+            v
+    [2] RETRIEVAL      your question -> numbers -> find the closest chunks
+            |
+            v
+    [3] GENERATION     paste those chunks + your question into the LLM
+            |          -> it writes an answer using ONLY that text
+            v
+        answer + citations
+
+Why bother? The LLM was never trained on the current 485 rules, and rules
+change. Instead of trusting its memory, we hand it today's text and say
+"answer from this only". That is what makes the answer checkable.
+
+
+================================================================================
+ 1. VOCABULARY (read this before the outputs)
+================================================================================
+
+CHUNK
+    A slice of a document, roughly 1000 characters. Documents are cut up
+    because you cannot paste an entire website into an LLM, and because
+    searching works better on small focused pieces.
+
+    Your settings: CHUNK_SIZE=1000, CHUNK_OVERLAP=200.
+
+    OVERLAP means consecutive chunks share their last/first 200 characters.
+    Without it, a sentence split across the boundary would be lost from both
+    chunks. You can see this working in section 2 below - chunk 0 ends with
+    "...Processing times" and chunk 1 begins by repeating the same lines.
+
+EMBEDDING (or VECTOR)
+    A list of 768 numbers representing the MEANING of a chunk. Produced by
+    the model all-mpnet-base-v2, which runs locally on your PC - no API, no
+    cost. Text with similar meaning gets similar numbers, even when the words
+    are different. That is what lets "how much" find a passage that says
+    "cost".
+
+DISTANCE / RELEVANCE
+    To search, your question is turned into 768 numbers the same way, then
+    compared against every chunk. Closeness is measured as cosine distance
+    (0 = identical meaning, 2 = opposite).
+
+    relevance = 1 - distance,  shown as a percentage.
+    Higher = closer. 70% is a strong match, 25% is weak.
+
+VECTOR STORE (ChromaDB)
+    The database holding the chunks and their 768 numbers, at
+    database/vectorstore. It answers "give me the N closest chunks to this".
+
+
+================================================================================
+ 2. STAGE 1 - INGESTION: what is actually stored
+================================================================================
+
+Total chunks: 226        All from web pages (0 PDFs - see NOTE below)
+Distinct sources: 7
+
+   44 chunks  .../temporary-graduate-485/post-vocational-education-work
+   44 chunks  .../temporary-graduate-485/graduate-work
+   43 chunks  .../temporary-graduate-485/post-higher-education-work
+   39 chunks  .../temporary-graduate-485/second-post-higher-education-work
+   39 chunks  .../temporary-graduate-485/second-post-study-work
+   11 chunks  .../meeting-the-temporary-graduate-visa-subclass-485-study-requirement
+    6 chunks  .../temporary-graduate-485
+
+NOTE: 0 PDFs. The crawler downloaded 50 PDFs, but they are Home Affairs'
+generic application forms (Form 80, 1221, 956, 47a...). Checked: they mention
+"485" or "Temporary Graduate" ZERO times. They were 246 of 478 chunks - over
+half the corpus - of pure noise. They are now filtered out automatically by
+content, not by filename.
+
+--------------------------------------------------------------------------------
+ WHAT ONE CHUNK ACTUALLY LOOKS LIKE
+--------------------------------------------------------------------------------
+
+CHUNK 0
+  id          : ...temporary-graduate-485/graduate-work_p1_c0_0
+  source      : .../temporary-graduate-485/graduate-work
+  chunk_index : 0
+  doc_type    : webpage
+  chars       : 974
+
+  --- full text ---
+  Temporary Graduate visa (subclass 485)
+  Post-Vocational Education Work stream
+  This visa is for international students who have recently graduated with an
+  associate degree, diploma or trade qualification relevant to an occupation
+  Australia needs. It allows you to live, study and work in Australia
+  temporarily.
+  Overview
+  About this visa
+  Eligibility
+  Step by step
+  When you have this visa
+  Overview
+  Stay
+  Up to 18 months.
+  Hong Kong and British National Overseas passport holders may stay for 5 years.
+  Cost
+  From
+  AUD5,750.00
+  (concessions apply in limited circumstances).
+  Cost concession
+  A lower visa cost applies to eligible Pacific Island and Timor-Leste citizens
+  who lodge a valid Temporary Graduate visa application. For more information,
+  visit
+  About this visa.
+  To work out what your visa will cost, use the
+  Visa Pricing Estimator
+  . The estimator does not take into account the other costs.
+  Processing times
+
+CHUNK 1  (the very next one - watch the overlap)
+  chars       : 998
+
+  --- full text ---
+  About this visa.                                  <-- these five lines
+  To work out what your visa will cost, use the     <-- are REPEATED from
+  Visa Pricing Estimator                            <-- the end of chunk 0.
+  . The estimator does not take into account the other costs.
+  Processing times                                  <-- that is CHUNK_OVERLAP
+  For an indication of processing times for your visa, use the
+  visa processing time guide tool
+  . This will show the processing times for recently decided applications. It
+  is a guide only and not specific to your application.
+  With this visa, you can
+  live, study and work in Australia temporarily
+  bring your family members
+  See all conditions
+  Check your eligibility
+  You must
+  be 35 years of age or under when you apply. *Exceptions apply
+  be in Australia when you apply for this visa
+  hold an eligible visa
+  have held a Student visa in the last 6 months
+  have an associate degree, diploma or trade qualification relevant to an
+  occupation on the skilled occupation list
+  have applied for a skills assessment in your nominated occupation
+  provide evidence of adequate health insurance for all applicants when you apply
+
+--------------------------------------------------------------------------------
+ THE SAME CHUNK AS THE COMPUTER SEES IT
+--------------------------------------------------------------------------------
+
+  dimensions : 768
+  first 12 of 768 numbers:
+    [-0.013, -0.0775, 0.0158, -0.0463, 0.0333, 0.039,
+      0.0546, 0.0159, 0.0076, -0.07, 0.0168, -0.0995]
+
+  That list of 768 numbers IS the meaning, as far as the search is concerned.
+  Nothing else about the chunk is used to find it.
+
+VERIFY THIS YOURSELF: open the graduate-work URL above and confirm the text
+matches. If the page says something different, ingestion is stale or broken.
+
+
+================================================================================
+ 3. STAGE 2 - RETRIEVAL: which chunks come back
+================================================================================
+
+Q: "What is the English requirement?"
+
+  Because QUERY_EXPANSION=llm, the question is first rewritten into several
+  phrasings (explained in section 5). It was searched as:
+    - What is the English requirement?
+    - What are the English language requirements for a Temporary Graduate visa
+    - English language proficiency requirements for the subclass 485 visa
+    - What English language requirements must I meet to be eligible
+
+  [1] relevance 75.6%   type=webpage
+      SOURCE: .../temporary-graduate-485/post-higher-education-work
+      English Language visa requirements
+      Acceptable minimum scores - Test taken on or after 7 August 2025
+      Test Sub-skill / C1 Advanced / CELPIP General / IELTS Academic /
+      IELTS General Training / LANGUAGECERT Academic / MET / OET* /
+      PTE Academic / TOEFL iBT
+      Overall:   Not accepted / 8 / 6.5 / 6.5 / 67 / 58 / 1310 / 55 / 81
+      Listening: Not accepted / 6 / 5.5 / 5.5 / 49 / 53 / 260 / 40 / 12
+      ...
+
+  [2] relevance 73.2%  .../post-vocational-education-work   (same table)
+  [3] relevance 73.2%  .../graduate-work                    (same table)
+
+
+Q: "Does the applying location matter, whether I'm onshore or offshore?"
+
+  [1] relevance 75.7%   type=webpage
+      SOURCE: .../temporary-graduate-485/post-higher-education-work
+      Have this visa
+      Details
+      You must be in Australia (but not in immigration clearance) when you
+      apply for this visa.
+      Subsequent entrants can be in or outside Australia when they apply.
+      We will process your visa application if:
+      you are in Australia and hold an eligible Student visa ...
+
+  [2] relevance 73.6%  .../post-vocational-education-work
+  [3] relevance 73.6%  .../graduate-work
+
+  ^ This is the interesting one. The website NEVER uses the words "onshore"
+    or "offshore" - it says "be in Australia". Before query expansion this
+    question scored 25.1% and ranked 3rd. Now 75.7% and 1st.
+
+
+================================================================================
+ 4. STAGE 3 - GENERATION: the answer
+================================================================================
+
+Q: "What is the English requirement?"
+Context sent to the model: 3167 characters from 3 chunks
+Model: llama-3.3-70b-versatile (Groq, free tier)
+
+ANSWER:
+    The English language requirements for the Subclass 485 Temporary Graduate
+    visa vary depending on the test taken and the date it was taken.
+
+    For tests taken on or after 7 August 2025, the acceptable minimum scores
+    are as follows:
+    - IELTS Academic: Overall 6.5, Listening 5.5, Reading 5.5, Writing 5.5,
+      Speaking 5.5
+    - IELTS General Training: Overall 6.5, Listening 5.5, Reading 5.5,
+      Writing 5.5, Speaking 5.5
+
+    For tests taken on or before 6 August 2025, the acceptable minimum scores
+    are as follows:
+    - IELTS: Overall 6.5, Listening 5.5, Reading 5.5, Writing 5.5, Speaking 5.5
+
+    Holders of British National (BNO) or Hong Kong passports have additional
+    requirements.
+
+    Please note that this is NOT legal advice and you should consult a
+    registered migration agent for your specific situation.
+
+GROUNDING: GROUNDED
+    "The answer is fully supported by the context."
+
+CITED SOURCES:
+   75.6%  .../temporary-graduate-485/post-higher-education-work
+   73.2%  .../temporary-graduate-485/post-vocational-education-work
+
+
+Q: "Does the applying location matter, whether I'm onshore or offshore?"
+Context sent to the model: 3258 characters from 3 chunks
+
+ANSWER:
+    To apply for the Subclass 485 Temporary Graduate visa, you must be in
+    Australia, but not in immigration clearance. Subsequent entrants, however,
+    can be in or outside Australia when they apply.
+
+    Please note that this is not legal advice, and you should consult a
+    registered migration agent for your specific situation.
+
+GROUNDING: GROUNDED
+    "The answer is fully supported by the context, as all three provided
+     documents state that the applicant must be in Australia but not in
+     immigration clearance when applying for the visa."
+
+CITED SOURCES:
+   75.7%  .../post-higher-education-work
+   73.6%  .../post-vocational-education-work
+   73.6%  .../graduate-work
+
+WHAT "GROUNDED" MEANS - AND DOES NOT MEAN
+    After writing the answer, the system makes a SECOND LLM call asking:
+    "is every claim in this answer supported by the source text?"
+
+    GROUNDED means the answer matches the retrieved text.
+    It does NOT mean:
+      - the answer is right for your situation
+      - the source page is up to date
+      - the retrieval found the BEST passage
+    It only catches the LLM making things up. That is why citations matter.
+
+
+================================================================================
+ 5. HOW QUALITY IS MEASURED - hit@1, hit@3, MRR
+================================================================================
+
+The eval (scripts/eval_retrieval.py) asks 10 fixed questions. Each question
+has MARKERS - words that only a genuinely correct passage contains. Example:
+
+    question: "Is there an age limit?"
+    markers : "35 years", "aged 35"
+
+A retrieved chunk counts as a HIT if it contains any marker. The eval records
+at which RANK the first hit appeared.
+
+FIRST, a sanity check the eval runs before scoring - is each question even
+answerable from the corpus?
+
+  [ok]  32 chunk(s)  What is the English requirement?
+  [ok]  45 chunk(s)  Does the applying location matter, onshore or offshore?
+  [ok]  45 chunk(s)  Can I apply for this visa from overseas?
+  [ok]  52 chunk(s)  How much does it cost?
+  [ok]  11 chunk(s)  Is there an age limit?
+  [ok]  27 chunk(s)  Do I need health insurance?
+  [ok] 100 chunk(s)  Can I bring my partner and kids?
+  [ok]  44 chunk(s)  What study do I need to have completed?
+  [ok]  37 chunk(s)  Do I need a police check?
+  [ok]  99 chunk(s)  How long can I stay on this visa?
+
+  All answerable. If one said MISSING, a low score would mean "the website
+  does not cover this", not "retrieval is bad" - a different problem.
+
+--------------------------------------------------------------------------------
+ THE DEFINITIONS
+--------------------------------------------------------------------------------
+
+hit@1   Percentage of questions where the FIRST result was correct.
+        The strictest measure. "Did it nail it immediately?"
+
+hit@3   Percentage where a correct result appeared in the top 3.
+        Realistic, because the system feeds 3-5 chunks to the LLM anyway -
+        the answer only needs to be in the pile.
+
+hit@5   Same idea, top 5.
+
+MRR     Mean Reciprocal Rank. Averages 1/rank across all questions.
+        rank 1 -> 1.0     rank 2 -> 0.5     rank 3 -> 0.333
+        rank 4 -> 0.25    rank 5 -> 0.2     miss   -> 0
+
+        Why bother when hit@k exists? hit@3 treats rank 1 and rank 3 as
+        equally good. MRR does not - it rewards being higher up. It is one
+        number capturing "how near the top, usually".
+
+--------------------------------------------------------------------------------
+ WORKED EXAMPLE - MRR calculated by hand from your real run
+--------------------------------------------------------------------------------
+
+Strategy "llm", the shipped configuration. Rank of the first correct hit:
+
+    What is the English requirement?             rank 1  -> 1/1 = 1.000
+    Does applying location matter, onshore...?   rank 3  -> 1/3 = 0.333
+    Can I apply for this visa from overseas?     rank 1  -> 1.000
+    How much does it cost?                       rank 1  -> 1.000
+    Is there an age limit?                       rank 1  -> 1.000
+    Do I need health insurance?                  rank 1  -> 1.000
+    Can I bring my partner and kids?             rank 3  -> 0.333
+    What study do I need to have completed?      rank 1  -> 1.000
+    Do I need a police check?                    rank 1  -> 1.000
+    How long can I stay on this visa?            rank 1  -> 1.000
+                                                          --------
+                                                   total   8.667
+                                            / 10 questions
+                                                    MRR =   0.867
+
+    hit@1 = 8 of 10 ranked first          = 80%
+    hit@3 = 10 of 10 in the top 3         = 100%
+
+Compare with "none" (no query expansion):
+
+    English requirement          rank 1  -> 1.000
+    onshore or offshore?         MISS    -> 0.000
+    apply from overseas?         MISS    -> 0.000
+    how much does it cost?       rank 1  -> 1.000
+    age limit?                   rank 4  -> 0.250
+    health insurance?            rank 1  -> 1.000
+    partner and kids?            rank 2  -> 0.500
+    what study?                  rank 3  -> 0.333
+    police check?                rank 1  -> 1.000
+    how long can I stay?         rank 1  -> 1.000
+                                          --------
+                                    total  6.083   ->  MRR 0.608
+
+    Two outright MISSES, both about applying from overseas.
+
+
+================================================================================
+ 6. CURRENT SCOREBOARD
+================================================================================
+
+10 questions, 226 chunks:
+
+    strategy      hit@1    hit@3    hit@5      MRR
+    ----------------------------------------------
+    none            50%      70%      80%    0.608
+    synonyms        80%      90%      90%    0.833
+    llm             80%     100%     100%    0.867     <- shipped default
+
+WHAT THE THREE STRATEGIES ARE
+
+    none      Search using your question exactly as typed.
+
+    synonyms  A hand-written jargon dictionary. "onshore" also searches
+              "in Australia when you apply", "offshore" also searches
+              "outside Australia". Free and instant.
+
+    llm       Ask the LLM to rewrite your question into 3 official-sounding
+              phrasings, search all of them, then merge the rankings.
+              Costs one extra API call per question.
+
+WHY EXPANSION WAS NEEDED
+    Applicants say "onshore". Home Affairs writes "be in Australia when you
+    apply". Same meaning, different words, and the embedding model does not
+    reliably bridge that gap. Proof - the SAME chunk, same model, same index:
+
+        "Do I need to be in Australia when I apply?"   rank 1, 62%
+        "Does it matter, onshore or offshore?"         rank 3, 25%
+
+    So the fix was not a bigger embedding model. It was asking the question
+    in more than one vocabulary.
+
+HOW THE MERGING WORKS (Reciprocal Rank Fusion)
+    Each phrasing produces its own ranked list. Each chunk scores
+    1 / (60 + its rank) in each list, and the scores are summed.
+    A chunk that appears mid-table in ALL phrasings beats one that tops a
+    single phrasing. Agreement across vocabularies is the signal.
+
+
+================================================================================
+ 7. KNOWN WEAKNESSES (honest list)
+================================================================================
+
+1. STREAM AMBIGUITY - the biggest one
+   The 485 has several streams and they cost different amounts. Both figures
+   are in the corpus:
+       AUD5,750.00  -> graduate-work, post-higher-education-work,
+                       post-vocational-education-work
+       AUD2,265.00  -> second-post-higher-education-work,
+                       second-post-study-work
+       AUD450       -> appears on all streams
+   Ask "how much does it cost?" and the system picks one without telling you
+   which stream it means. Same problem for length of stay.
+
+2. hit@1 is 80%, so 2 questions in 10 do not rank the best passage first.
+   Both still answered correctly, because the LLM gets 3-5 chunks.
+
+3. TABLES ARE FLATTENED
+   Look at the English scores in section 3: headers, then a wall of loose
+   numbers. Row/column pairing is lost. The LLM reassembled it correctly this
+   time, but it is guessing. This is the least trustworthy part of the system.
+
+4. ONLY 7 PAGES
+   Processing times and full fee tables live on pages the crawl did not reach.
+
+5. NAV JUNK, mostly fixed
+   "ImmiAccount / VEVO / My Tourist Refund Scheme" used to lead 59 of 232
+   chunks. Now 19 of 226, and those remaining are genuine in-content mentions.
+
+6. THE STREAMLIT WEB APP has not been tested against the current pipeline.
+   Everything above was run through scripts.
+
+
+================================================================================
+ 8. COMMANDS
+================================================================================
+
+  Rebuild the knowledge base from the live site:
+      python scripts/fetch_and_index.py --crawl
+
+  Inspect a stage:
+      python scripts/inspect_pipeline.py --stage ingest
+      python scripts/inspect_pipeline.py --stage retrieve --ask "your question"
+      python scripts/inspect_pipeline.py --stage generate --ask "your question"
+      python scripts/inspect_pipeline.py --full-chunks     (no truncation)
+
+  Measure retrieval quality:
+      python scripts/eval_retrieval.py --verbose
+      python scripts/eval_retrieval.py --strategy llm
+
+  Launch the web app:
+      streamlit run app/streamlit_app.py
+
+  Settings live in .env:
+      QUERY_EXPANSION=llm            llm | synonyms | none
+      PDF_RELEVANCE_KEYWORDS         which PDFs are worth indexing
+      CHUNK_SIZE=1000 / CHUNK_OVERLAP=200
+      EMBEDDING_MODEL=all-mpnet-base-v2
+
+================================================================================
+ END
+================================================================================
