@@ -17,11 +17,7 @@ import streamlit as st
 
 from src.utils.db_manager import DatabaseManager
 
-st.set_page_config(
-    page_title="📊 Changes — 485 Visa Intelligence",
-    page_icon="📊",
-    layout="wide",
-)
+# set_page_config lives in streamlit_app.py, the navigation entry point.
 
 st.title("📊 Policy Change Timeline")
 st.markdown("Track detected changes to 485 visa policy documents over time.")

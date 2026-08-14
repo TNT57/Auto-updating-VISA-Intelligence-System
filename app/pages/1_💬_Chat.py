@@ -13,18 +13,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
+import app.bootstrap  # noqa: F401  — sets sys.path and bridges st.secrets
 from src.utils.config import settings
 
-st.set_page_config(
-    page_title="💬 Chat — 485 Visa Intelligence",
-    page_icon="💬",
-    layout="wide",
-)
+# set_page_config lives in streamlit_app.py, the navigation entry point.
+# Calling it again here raises once the app is routed through st.navigation.
 
 st.title("💬 Ask About the 485 Visa")
 st.markdown(
     "Ask any question about the Temporary Graduate (Subclass 485) visa. "
-    "Answers are sourced from official documents with citations."
+    "Answers are drawn from official Department of Home Affairs pages, with "
+    "a link to the source of every answer."
 )
 
 # ---- Initialize session state ----
@@ -76,48 +75,54 @@ st.warning(
     "official documents but may not reflect the very latest changes."
 )
 
-# ---- Sidebar: Chat controls ----
+EXAMPLE_QUESTIONS = [
+    "What are the English requirements?",
+    "How long can I stay on this visa?",
+    "What documents do I need?",
+    "How much does it cost?",
+    "Can I include family members?",
+    "Do I need to be in Australia when I apply?",
+]
+
+# How many passages to retrieve. Operators can tune it; a visitor should not
+# have to understand retrieval depth to ask a question.
+DEFAULT_N_RESULTS = 5
+
+# ---- Sidebar: chat controls ----
 # Rendered before the chat handler below so `n_results` is defined by the
 # time a question is answered — Streamlit executes the script top to bottom.
+n_results = DEFAULT_N_RESULTS
+
 with st.sidebar:
-    st.markdown("### 💬 Chat Controls")
+    if not settings.public_mode:
+        st.markdown("### 💬 Chat Controls")
+        n_results = st.slider(
+            "Number of sources to retrieve",
+            min_value=1,
+            max_value=10,
+            value=DEFAULT_N_RESULTS,
+            help="More sources = more context but slower responses",
+        )
 
-    n_results = st.slider(
-        "Number of sources to retrieve",
-        min_value=1,
-        max_value=10,
-        value=5,
-        help="More sources = more context but slower responses",
-    )
-
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
+    if st.button("🗑️ Clear chat history", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-    st.divider()
-
-    # Show vectorstore stats
-    st.markdown("### 📊 Vector Store")
-    try:
-        stats = st.session_state.retriever.vectorstore.get_collection_stats()
-        st.metric("Total Chunks", stats["total_chunks"])
-        st.caption(f"Model: {stats['embedding_model']}")
-    except Exception:
-        st.info("Run setup script first")
+    if not settings.public_mode:
+        st.divider()
+        st.markdown("### 📊 Vector Store")
+        try:
+            stats = st.session_state.retriever.vectorstore.get_collection_stats()
+            st.metric("Total Chunks", stats["total_chunks"])
+            st.caption(f"Model: {stats['embedding_model']}")
+        except Exception:
+            st.info("Run setup script first")
 
     st.divider()
 
     # Example questions — clicking one queues it as the next question.
-    st.markdown("### 💡 Example Questions")
-    examples = [
-        "What are the English requirements?",
-        "How long is the 485 visa valid?",
-        "What documents do I need?",
-        "What is the application fee?",
-        "Can I include family members?",
-        "What are the eligibility criteria?",
-    ]
-    for ex in examples:
+    st.markdown("### 💡 Example questions")
+    for ex in EXAMPLE_QUESTIONS:
         if st.button(ex, key=f"ex_{ex}", use_container_width=True):
             st.session_state.pending_question = ex
             st.rerun()

@@ -16,11 +16,7 @@ import streamlit as st
 
 from src.utils.config import settings
 
-st.set_page_config(
-    page_title="🔔 Alerts — 485 Visa Intelligence",
-    page_icon="🔔",
-    layout="wide",
-)
+# set_page_config lives in streamlit_app.py, the navigation entry point.
 
 st.title("🔔 Alerts")
 st.markdown("Discord notifications for detected 485 visa policy changes.")

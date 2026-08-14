@@ -1,33 +1,109 @@
 # 🛂 Auto-Updating VISA Intelligence System
 
-> A side project exploring **RAG (Retrieval-Augmented Generation)** to build an intelligent, self-updating knowledge base for Australian immigration policy — because government websites change constantly, and keeping track manually is painful.
+> Ask questions about the Australian **Subclass 485 Temporary Graduate visa**
+> and get answers drawn from the Department of Home Affairs' own pages, with a
+> link to the source of every claim.
+
+<!-- DEPLOY-LINK -->
+**Live app:** _not deployed yet — see [Deploying to Streamlit Cloud](#deploying-to-streamlit-cloud)_
 
 ---
 
-## What It Does
+## What it does
 
-This system monitors the Australian Department of Home Affairs website for changes to visa policies (currently targeting the **485 Temporary Graduate visa**), automatically ingests updated documents into a vector database, and lets you chat with the latest policy information through an AI-powered interface.
+Australian visa rules change often, and the answers are spread across pages
+that render entirely in JavaScript. This project scrapes those pages, indexes
+them, and answers questions from them.
 
-| Feature | How It Works |
-|---|---|
-| **PDF Ingestion & Chunking** | Extracts text and tables from government PDFs using `pdfplumber`, splits into semantic chunks with `langchain-text-splitters` |
-| **Vector Search (RAG)** | Embeds chunks with `SentenceTransformers` (`all-mpnet-base-v2`), stores in `ChromaDB`, retrieves relevant context for queries |
-| **AI-Powered Chat** | Uses `Groq` (Llama 3.3 70B) to generate grounded answers, then re-checks each answer against its sources |
-| **Web Scraping & Monitoring** | Scrapes the Home Affairs website on a schedule via `BeautifulSoup`, detects content changes |
-| **Change Detection** | Stores page snapshots in `SQLite` and diffs them to flag policy updates, with LLM severity classification |
-| **Alerts** | Discord webhook notifications for changes at or above a configurable severity. *Currently parked — see Project Status* |
-| **Dashboard** | `Streamlit` multi-page app with chat, change log, and alert status |
-| **Automated Pipeline** | GitHub Actions workflow runs daily scraping, change detection, re-ingestion, and alerting |
+Ask *"how much does it cost?"* and it replies:
 
-## Why This Project
+```
+- Post-Higher Education Work stream:        From AUD5,750.00
+- Post-Vocational Education Work stream:    From AUD5,750.00
+- Second Post-Higher Education Work stream: From AUD2,265.00
+```
 
-I built this to solve a real problem I faced — Australian visa rules update frequently and the changes are buried in long PDF documents. Instead of manually checking and re-reading, I wanted a system that:
+…because the fee genuinely differs by stream, and answering with one number
+would be wrong. Every answer is re-checked against its sources before you see
+it, and cites the pages it came from.
 
-1. **Notifies me** when something changes
-2. **Lets me ask questions** about the current rules in plain English
-3. **Shows me exactly what changed** between versions
+## How it works
 
-It also served as a hands-on way to learn and apply RAG patterns, vector databases, and LLM integration end-to-end.
+Three stages. There is a full walkthrough with real output in
+[`docs/PIPELINE_WALKTHROUGH.txt`](docs/PIPELINE_WALKTHROUGH.txt).
+
+**1. Ingestion** — `scripts/fetch_and_index.py`
+
+The Home Affairs pages build their content client-side: a plain HTTP fetch
+returns 1.2MB of HTML containing about 1,400 characters of text, all
+navigation, with the body reading "Loading". So pages are rendered in a real
+browser, the content extracted, split into ~1,000-character overlapping
+**chunks**, and each chunk converted into a 768-number **embedding** that
+captures its meaning. Those live in a local ChromaDB vector store.
+
+Generic application forms (Form 80, 1221, 956…) are linked from every visa
+page and were 246 of 478 chunks while mentioning the visa zero times. They are
+now filtered out on content, not filename.
+
+**2. Retrieval** — `src/retrieval/`
+
+Your question is embedded the same way, and the closest chunks come back.
+The interesting part is **query expansion** — see below.
+
+**3. Generation** — `src/generation/`
+
+The top passages go to Llama 3.3 70B (via Groq's free tier) with instructions
+to use only what it was given. A second call then re-reads the answer against
+those same passages and labels it GROUNDED, PARTIALLY_GROUNDED or UNGROUNDED.
+When the answer isn't in the corpus, it says so rather than inventing one.
+
+### Query expansion: the fix that mattered most
+
+Applicants and governments use different words for the same thing. Asked two
+ways, the *same* passage scored very differently:
+
+| Question | Rank | Relevance |
+|---|---|---|
+| "Do I need to be in Australia when I apply?" | 1st | 62% |
+| "Does it matter, onshore or offshore?" | 3rd | 25% |
+
+Same chunk, same model, same index. "Onshore" is migration-agent shorthand;
+Home Affairs writes "be in Australia when you apply". Dense retrieval matches
+on meaning, but it cannot bridge vocabulary it has never seen paired.
+
+So before searching, the question is rewritten into several phrasings — by the
+LLM, or by a built-in map of migration jargon — each one searched separately,
+and the rankings combined with **reciprocal rank fusion**. A chunk that ranks
+respectably for several phrasings beats one that ranks first for a single
+lucky wording, so *agreement across vocabularies* becomes the signal.
+
+Measured over 226 chunks of live content, 10 questions
+(`python scripts/eval_retrieval.py`):
+
+| Strategy | hit@1 | hit@3 | MRR |
+|---|---|---|---|
+| `none` — single query | 50% | 70% | 0.608 |
+| `synonyms` — jargon map, free and instant | 80% | 90% | 0.833 |
+| **`llm`** — LLM paraphrase (default) | **80%** | **100%** | **0.867** |
+
+*hit@1* = the right passage ranked first. *hit@3* = it was in the top three.
+*MRR* = mean of 1/rank, so first place scores 1.0, third scores 0.33 — one
+number for "how near the top, usually". The onshore/offshore question moved
+from 25% to 66% relevance.
+
+Set with `QUERY_EXPANSION=llm|synonyms|none`.
+
+## Why this project
+
+Australian visa rules update frequently and the changes are buried across long
+pages and PDFs. Instead of checking manually, I wanted something that:
+
+1. **Answers questions** about the current rules in plain English
+2. **Cites its sources** so any answer can be verified
+3. **Notices when something changes** (built; parked — see Project Status)
+
+It was also a way to learn RAG, vector databases and LLM integration
+end-to-end.
 
 ## Architecture
 
@@ -149,6 +225,12 @@ runtime. That shapes the deployment:
    variables take precedence, so a local `.env` is unaffected.
 
 4. **Main file path:** `app/streamlit_app.py`.
+
+5. **Visitors see the chat and nothing else.** `PUBLIC_MODE` defaults to
+   `true`, so the Changes and Alerts pages, the retrieval-depth slider and the
+   chunk-count readouts — all operator tooling — are not merely hidden but
+   unreachable, since `st.navigation` bypasses Streamlit's automatic page
+   discovery. Set `PUBLIC_MODE=false` locally to get the operator view.
 
 ⚠️ **Memory.** `sentence-transformers` pulls in PyTorch, and the embedding
 model (`all-mpnet-base-v2`, 768-dim) is ~420MB. On Streamlit Cloud's free

@@ -23,10 +23,12 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      # Both files: requirements.txt is the deployed app's runtime only, so
+      # pytest, ruff and the ingestion libraries live in requirements-dev.txt.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Lint
         run: ruff check .
@@ -41,9 +43,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/huggingface
-          key: hf-${{ hashFiles('requirements.txt') }}
+          key: hf-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
           restore-keys: |
             hf-
+
+      - name: Install browser for integration tests
+        run: python -m playwright install --with-deps chromium
 
       - name: Run integration tests
         run: pytest tests/ -v -m integration

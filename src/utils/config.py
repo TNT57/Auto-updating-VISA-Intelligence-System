@@ -112,6 +112,14 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, alias="CHUNK_OVERLAP")
 
+    # ---- UI ----
+    # Public deployments show the chat and nothing else. The Changes and
+    # Alerts pages are operator tooling — scrape history, webhook status,
+    # delivery logs — which is noise to someone who came to ask a visa
+    # question, and exposes how the system is wired. Set PUBLIC_MODE=false
+    # locally to see them.
+    public_mode: bool = Field(default=True, alias="PUBLIC_MODE")
+
     # ---- PDF relevance ----
     # Pages link to Home Affairs' generic application forms (80, 1221, 956,
     # 47a...). Indexed, they contributed 246 of 478 chunks — over half the
