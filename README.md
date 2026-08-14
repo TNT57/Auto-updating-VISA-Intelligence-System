@@ -5,7 +5,13 @@
 > link to the source of every claim.
 
 <!-- DEPLOY-LINK -->
-**Live app:** _not deployed yet — see [Deploying to Streamlit Cloud](#deploying-to-streamlit-cloud)_
+### ▶️ [Try it live](https://auto-updating-visa-intelligence-system.streamlit.app/)
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://auto-updating-visa-intelligence-system.streamlit.app/)
+
+The deployed app serves the chat and nothing else — see
+[Deploying to Streamlit Cloud](#deploying-to-streamlit-cloud). It may take a
+few seconds to wake if it has been idle.
 
 ---
 
