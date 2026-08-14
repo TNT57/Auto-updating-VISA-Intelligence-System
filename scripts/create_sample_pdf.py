@@ -1,4 +1,21 @@
-"""Create a sample PDF with real 485 visa information for testing the system."""
+"""
+Generate a synthetic PDF for exercising the ingestion pipeline offline.
+
+⚠️  THE CONTENT IS MADE UP. It was written before the scraper worked, and it
+    is now out of date as well as invented — it describes a "Post-Study Work
+    stream" and COVID-era travel concessions that no longer apply.
+
+    Writing into data/raw/pdfs/ puts it straight into the knowledge base,
+    where it once outranked the real Home Affairs pages and answered a
+    question about application location with fabricated detail. It passes the
+    PDF relevance filter because it mentions "485".
+
+    Prefer scripts/fetch_and_index.py, which indexes the live site. If you do
+    run this, write somewhere outside data/raw/pdfs/ and delete it afterwards:
+
+        python scripts/create_sample_pdf.py --out /tmp/sample.pdf
+"""
+import argparse
 import os
 import sys
 
@@ -6,9 +23,23 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 from fpdf import FPDF
 
-pdf_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw', 'pdfs')
-os.makedirs(pdf_dir, exist_ok=True)
-pdf_path = os.path.join(pdf_dir, '485_visa_info.pdf')
+_parser = argparse.ArgumentParser(description=__doc__)
+_parser.add_argument(
+    "--out",
+    help="Where to write the PDF. Defaults to data/raw/pdfs/, which indexes "
+         "this invented content — pass an explicit path to avoid that.",
+)
+_args = _parser.parse_args()
+
+if _args.out:
+    pdf_path = _args.out
+    os.makedirs(os.path.dirname(os.path.abspath(pdf_path)) or ".", exist_ok=True)
+else:
+    print("WARNING: writing invented visa content into the knowledge base "
+          "directory. Use --out to write elsewhere.")
+    pdf_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw', 'pdfs')
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_path = os.path.join(pdf_dir, '485_visa_info.pdf')
 
 pdf = FPDF()
 pdf.add_page()

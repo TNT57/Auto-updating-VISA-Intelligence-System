@@ -301,8 +301,21 @@ Cache directories are configured in two places so they always point inside the p
 | Alert system (Discord) | ⏸️ Built, parked | Working and tested, but off by default — set `ALERTS_ENABLED=true` |
 | Email alerts | ❌ Not implemented | SMTP settings exist in config but are unused |
 | Alerts config page | ⚠️ Read-only | Shows status; configure via `.env`, not the UI |
-| GitHub Actions daily scrape | ✅ Configured | State cached between runs |
-| CI (tests + lint) | ✅ Configured | `.github/workflows/tests.yml` |
+| GitHub Actions daily scrape | ✅ Working | Cheap detect pass daily; re-indexes and commits only on change |
+| CI (tests + lint) | ✅ Working | `.github/workflows/tests.yml` |
+
+### Known limitations / future work
+
+- **HTML tables lose their structure.** The scraper flattens a `<table>` to one
+  cell per line, so the English score grids arrive as a header list followed by
+  a run of loose numbers and the LLM has to re-pair them by position. Answers
+  spot-checked against the live page have been correct, helped by the chunk
+  overlap keeping headers beside their values, but a merged or empty cell would
+  break the alignment silently. `pdf_loader.py` already renders PDF tables as
+  markdown; porting that to the HTML path would fix it properly.
+- **Coverage is 7 pages** under the `/temporary-graduate-485` prefix. Processing
+  times and the full fee schedule live elsewhere, so those questions get an
+  honest "not in the provided documents" rather than an answer.
 
 To run it yourself:
 1. Add a `GROQ_API_KEY` to your `.env` file (free at [console.groq.com](https://console.groq.com/keys))
