@@ -1,4 +1,4 @@
-"""
+﻿"""
 Change Timeline page — View detected policy changes.
 
 Displays a timeline of detected changes with severity badges,

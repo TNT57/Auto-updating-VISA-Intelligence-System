@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
+import app.bootstrap  # noqa: F401  — sets sys.path and bridges st.secrets
+
 st.set_page_config(
     page_title="485 Visa Intelligence",
     page_icon="🛂",

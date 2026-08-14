@@ -1,4 +1,4 @@
-"""
+﻿"""
 Chat page — Interactive RAG Q&A interface.
 
 Users ask questions about the 485 visa and get AI-powered answers

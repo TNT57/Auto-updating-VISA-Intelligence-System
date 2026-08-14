@@ -1,4 +1,4 @@
-"""
+﻿"""
 Alerts page — Discord notification status and delivery history.
 
 Configuration lives in `.env` (DISCORD_WEBHOOK_URL, ALERT_MIN_SEVERITY) rather

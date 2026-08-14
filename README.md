@@ -119,6 +119,47 @@ python scripts/fetch_and_index.py --crawl
 streamlit run app/streamlit_app.py
 ```
 
+## Deploying to Streamlit Cloud
+
+The app serves questions from a pre-built index; it does not scrape at
+runtime. That shapes the deployment:
+
+1. **The vector store is committed** (`database/vectorstore/`, ~7.5MB).
+   Streamlit Cloud deploys from a git clone onto an ephemeral filesystem, so
+   an ignored index would mean a deployed app with an empty knowledge base.
+   Committing it also makes deploys reproducible — the app ships the exact
+   corpus it was tested against. Rebuild and re-commit with
+   `python scripts/fetch_and_index.py --crawl`.
+
+2. **`requirements.txt` holds runtime dependencies only.** Scraping, PDF
+   parsing, Playwright and dev tooling live in `requirements-dev.txt`: they
+   build the index, they are not needed to query one, and they would waste a
+   constrained container.
+
+3. **Set secrets in the Streamlit Cloud UI**, not a `.env`. Under
+   *Settings → Secrets*:
+
+   ```toml
+   GROQ_API_KEY = "gsk_..."
+   QUERY_EXPANSION = "llm"
+   ```
+
+   `app/bootstrap.py` copies these into the environment before settings are
+   read, so the same config code works locally and deployed. Real environment
+   variables take precedence, so a local `.env` is unaffected.
+
+4. **Main file path:** `app/streamlit_app.py`.
+
+⚠️ **Memory.** `sentence-transformers` pulls in PyTorch, and the embedding
+model (`all-mpnet-base-v2`, 768-dim) is ~420MB. On Streamlit Cloud's free
+tier that is close to the limit and may fail to boot. If it does, switch to
+ChromaDB's bundled ONNX model (`all-MiniLM-L6-v2`, 384-dim, no PyTorch): set
+`EMBEDDING_MODEL=all-MiniLM-L6-v2`, rebuild with
+`python scripts/initial_setup.py --rebuild` then
+`python scripts/fetch_and_index.py --crawl`, and re-commit. Retrieval quality
+drops; measure it with `scripts/eval_retrieval.py` before and after rather
+than guessing.
+
 ### Building the knowledge base
 
 `scripts/fetch_and_index.py` is what puts real content behind the chat. It
