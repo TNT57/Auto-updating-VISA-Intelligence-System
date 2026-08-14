@@ -1,4 +1,4 @@
-"""
+﻿"""
 Change Timeline page — View detected policy changes.
 
 Displays a timeline of detected changes with severity badges,
@@ -11,18 +11,13 @@ from pathlib import Path
 # Ensure project root is on sys.path so 'src' package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-import streamlit as st
-import plotly.express as px
 import pandas as pd
+import plotly.express as px
+import streamlit as st
 
 from src.utils.db_manager import DatabaseManager
-from src.utils.config import settings
 
-st.set_page_config(
-    page_title="📊 Changes — 485 Visa Intelligence",
-    page_icon="📊",
-    layout="wide",
-)
+# set_page_config lives in streamlit_app.py, the navigation entry point.
 
 st.title("📊 Policy Change Timeline")
 st.markdown("Track detected changes to 485 visa policy documents over time.")
@@ -149,11 +144,11 @@ if len(df) > 0:
         title="Change Timeline",
     )
     fig.update_layout(
-        yaxis=dict(
-            categoryorder="array",
-            categoryarray=["CRITICAL", "IMPORTANT", "MINOR"],
-        ),
-        margin=dict(l=20, r=20, t=40, b=20),
+        yaxis={
+            "categoryorder": "array",
+            "categoryarray": ["CRITICAL", "IMPORTANT", "MINOR"],
+        },
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
     )
     st.plotly_chart(fig, use_container_width=True)
 

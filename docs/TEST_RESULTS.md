@@ -66,6 +66,13 @@
 | Bug | Root Cause | Fix |
 |-----|-----------|-----|
 | Grounding verdict "UNGROUNDED" parsed as UNKNOWN | `llm_client.py` checked for `"UNGUARDED"` but prompt template used `"UNGROUNDED"` | Changed parser to match prompt template (`"UNGROUNDED"`) |
+| Ungrounded answers never flagged in the UI | The same `"UNGUARDED"` typo also existed in `app/pages/1_💬_Chat.py` and was missed by the fix above | Corrected the Chat page comparison too |
+| Scheduled runs could never detect a change | Previous snapshots were read from gitignored files, which don't survive an ephemeral CI runner | Snapshots moved into SQLite (`page_snapshots`); `changes.db` cached between runs |
+| Severity classifier ignored new text | `old or "" + new or ""` parses as `old or ("" + new)`, so a replace short-circuited on the old value | Both blocks are now joined explicitly before classification |
+| Relevance always displayed 0% | Collection used Chroma's default squared-L2 space while `retriever.py` assumed cosine | Collection now pins `hnsw:space=cosine` |
+| Sidebar always warned "Vector DB not initialized" | `settings.collection_name` doesn't exist; the `AttributeError` was swallowed | Uses `VectorStoreManager.COLLECTION_NAME` |
+| "Sources to retrieve" slider did nothing | Retrieval was hardcoded to `n_results=5`, and the slider rendered after the handler | Slider moved above the handler and its value passed through |
+| Example question buttons did nothing | Handler called `st.chat_input()`, which cannot inject a value | Buttons queue via `st.session_state` and rerun |
 
 ---
 

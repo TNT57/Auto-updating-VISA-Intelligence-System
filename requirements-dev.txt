@@ -1,0 +1,29 @@
+# ============================================
+# Everything needed to BUILD the knowledge base and develop the project.
+# The deployed app does not need any of this — see requirements.txt.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+# ============================================
+
+# ---- Ingestion ----
+langchain-text-splitters>=0.3.0
+pypdf>=5.0.0
+pdfplumber>=0.11.0
+
+# ---- Scraping ----
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+httpx>=0.27.0
+# Browser-impersonating fetch backend (src/scraping/fetchers.py). The
+# [fetchers] extra pulls in curl_cffi, which the base package omits.
+# The scraper falls back to httpx if this is not installed.
+scrapling[fetchers]>=0.4.14
+# The Home Affairs pages render their content client-side, so a real browser
+# is required to extract anything. After installing:
+#     python -m playwright install chromium
+playwright>=1.40.0
+
+# ---- Dev / test ----
+pytest>=8.0.0
+ruff>=0.6.0
+fpdf2>=2.7.0

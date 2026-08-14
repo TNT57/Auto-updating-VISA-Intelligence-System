@@ -8,13 +8,10 @@ Covers:
   - End-to-end smoke test
 """
 
-import hashlib
 import importlib
-import os
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -205,7 +202,7 @@ class TestPDFLoader:
     @patch("src.ingestion.pdf_loader.pdfplumber")
     def test_table_extraction_marks_metadata(self, mock_pdfplumber, mock_hash):
         """Improvement #4: Pages with tables should have has_tables=True in metadata."""
-        from src.ingestion.pdf_loader import PDFLoader, DocumentChunk
+        from src.ingestion.pdf_loader import PDFLoader
 
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "Page with table"
@@ -748,8 +745,8 @@ class TestIntegration:
 
     def test_change_detection_pipeline(self, tmp_path):
         """Full change detection pipeline: hash → diff → classify → record."""
-        from src.utils.db_manager import DatabaseManager
         from src.monitoring.change_detector import ChangeDetector
+        from src.utils.db_manager import DatabaseManager
 
         db_path = tmp_path / "test_changes.db"
         db = DatabaseManager(db_path=str(db_path))

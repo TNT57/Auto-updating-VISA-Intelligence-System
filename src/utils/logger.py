@@ -6,8 +6,10 @@ both console and file output.
 """
 
 import sys
+
 from loguru import logger
-from src.utils.config import settings, BASE_DIR
+
+from src.utils.config import BASE_DIR, settings
 
 
 def setup_logger() -> None:

@@ -11,12 +11,11 @@ Detected changes are recorded in SQLite via DatabaseManager.
 """
 
 import difflib
-from datetime import datetime
 
 from loguru import logger
 
+from src.utils.config import settings
 from src.utils.db_manager import DatabaseManager
-
 
 # ------------------------------------------------------------------
 # Severity classification keywords
@@ -140,10 +139,25 @@ class ChangeDetector:
                 "source_url": source_url,
             }]
 
-        # Level 3 — Classify each diff
+        # Level 3 — Classify each diff.
+        # LLM classification is capped per run: a page-wide rewrite can produce
+        # dozens of diff blocks, and one Groq call each would exhaust the free
+        # tier's rate limit. Blocks past the cap use the keyword fallback.
         changes = []
+        llm_budget = settings.max_llm_classifications
+
         for diff in diffs:
-            diff["severity"] = self.classify_severity(diff["old_value"] or "" + diff["new_value"] or "")
+            changed_text = "\n".join(
+                part for part in (diff["old_value"], diff["new_value"]) if part
+            )
+            use_llm_for_this = self.use_llm and llm_budget > 0
+            diff["severity"] = self.classify_severity(
+                changed_text,
+                summary=diff.get("summary"),
+                use_llm=use_llm_for_this,
+            )
+            if use_llm_for_this:
+                llm_budget -= 1
             diff["source_url"] = source_url
             changes.append(diff)
 
@@ -175,15 +189,26 @@ class ChangeDetector:
 
         return changes
 
-    def classify_severity(self, text: str, summary: str | None = None) -> str:
+    def classify_severity(
+        self,
+        text: str,
+        summary: str | None = None,
+        use_llm: bool | None = None,
+    ) -> str:
         """
         Classify a change as CRITICAL, IMPORTANT, or MINOR.
 
         Tries LLM-based classification first (Improvement #5).
         Falls back to keyword matching if LLM is unavailable.
+
+        `use_llm` overrides the instance setting for a single call, which lets
+        the caller cap how many LLM requests one run makes.
         """
+        if use_llm is None:
+            use_llm = self.use_llm
+
         # Try LLM-based classification
-        if self.use_llm:
+        if use_llm:
             llm = self._get_llm_client()
             if llm:
                 try:

@@ -1,6 +1,7 @@
 """Create a sample PDF with real 485 visa information for testing the system."""
-import sys
 import os
+import sys
+
 sys.stdout.reconfigure(encoding='utf-8')
 
 from fpdf import FPDF
@@ -125,4 +126,4 @@ for heading, paragraphs in sections:
 pdf.output(pdf_path)
 print(f"PDF created at: {pdf_path}")
 print(f"PDF size: {os.path.getsize(pdf_path)} bytes")
-print(f"\nDone! Now run: python scripts/initial_setup.py")
+print("\nDone! Now run: python scripts/initial_setup.py")

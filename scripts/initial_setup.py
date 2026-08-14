@@ -39,7 +39,7 @@ def check_env_file() -> bool:
 
     if not env_path.exists():
         print("❌ No .env file found!")
-        print(f"   Creating .env from .env.example...")
+        print("   Creating .env from .env.example...")
         if env_example.exists():
             import shutil
             shutil.copy(env_example, env_path)
@@ -83,38 +83,53 @@ def check_pdfs() -> bool:
     return True
 
 
-def build_vectorstore() -> bool:
-    """Build the vector database from PDF documents."""
+def build_vectorstore(rebuild: bool = False) -> bool:
+    """
+    Build the vector database from local PDF documents.
+
+    Delegates to src.ingestion.pipeline so this shares one code path with
+    fetch_and_index and daily_update. It previously chunked and added PDFs
+    itself, which meant --rebuild silently re-indexed the generic application
+    forms that the pipeline's relevance filter exists to exclude.
+    """
     try:
-        from src.ingestion.pdf_loader import PDFLoader
-        from src.ingestion.text_chunker import TextChunker
+        from src.ingestion.pipeline import ingest_pdfs
         from src.ingestion.vectorstore_manager import VectorStoreManager
-        from src.utils.logger import logger
+        from src.utils.db_manager import DatabaseManager
 
         print("\n📚 Building vector database...")
 
-        # Step 1: Load PDFs
-        print("   Step 1/3: Extracting text from PDFs...")
-        loader = PDFLoader()
-        pages = loader.load_all_pdfs()
-
-        if not pages:
-            print("   ❌ No content extracted from PDFs")
-            return False
-        print(f"   ✅ Extracted {len(pages)} pages")
-
-        # Step 2: Chunk text
-        print("   Step 2/3: Chunking text...")
-        chunker = TextChunker()
-        chunks = chunker.chunk_document(pages)
-        print(f"   ✅ Created {len(chunks)} chunks")
-
-        # Step 3: Add to vectorstore
-        print("   Step 3/3: Building embeddings and storing in ChromaDB...")
         vs = VectorStoreManager()
-        vs.add_chunks(chunks)
+        if rebuild:
+            print("   Rebuilding: dropping the existing collection first...")
+            try:
+                vs.reset_collection()
+                print("   ✅ Collection reset")
+            except Exception as exc:
+                # Nothing to drop on a first run.
+                print(f"   ℹ️  Nothing to reset ({exc})")
+
+        db = DatabaseManager()
+        db.create_tables()
+
+        if rebuild:
+            # The collection is gone, so the recorded file hashes would
+            # otherwise make every PDF look "already ingested" and skip it.
+            from src.utils.db_manager import Document
+
+            with db.get_session() as session:
+                session.query(Document).delete()
+                session.commit()
+
+        print("   Extracting, filtering and indexing PDFs...")
+        added = ingest_pdfs(db)
+
         stats = vs.get_collection_stats()
-        print(f"   ✅ Vector database built: {stats['total_chunks']} chunks")
+        print(f"   ✅ Added {added} chunks "
+              f"({stats['total_chunks']} total in collection)")
+        if added == 0:
+            print("   ℹ️  No relevant PDFs found. Generic application forms "
+                  "are skipped by design; see PDF_RELEVANCE_KEYWORDS.")
 
         return True
 
@@ -168,6 +183,19 @@ def test_query() -> bool:
 
 def main():
     """Run the full setup process."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="First-time setup for the 485 Visa Intelligence System."
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Drop and rebuild the vector collection from scratch. Required "
+             "after changing the embedding model or distance metric.",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("🛂 485 Visa Intelligence System — Initial Setup")
     print("=" * 60)
@@ -189,7 +217,7 @@ def main():
     # Step 4: Build vectorstore (only if PDFs exist)
     vs_ok = False
     if pdfs_ok:
-        vs_ok = build_vectorstore()
+        vs_ok = build_vectorstore(rebuild=args.rebuild)
     else:
         print("⏭️  Skipping vectorstore build (no PDFs)")
 
