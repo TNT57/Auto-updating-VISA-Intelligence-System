@@ -9,9 +9,15 @@ Pipeline:
     1. Scrape all monitored URLs (download new PDFs, save HTML snapshots)
     2. Load previous snapshots and compare for changes
     3. Record detected changes in SQLite
-    4. Re-ingest any updated/new PDFs into ChromaDB
+    4. Re-ingest into ChromaDB — only when something actually changed
+    5. Alert, if ALERTS_ENABLED
+
+Step 4 is the expensive one: it needs PyTorch and a 420MB embedding model.
+The monitored pages change rarely, so it is skipped whenever the content
+hashes match, and can be skipped outright with --detect-only.
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -61,7 +67,7 @@ reingest_updated_pdfs = ingest_pdfs
 ingest_scraped_pages = ingest_pages
 
 
-def run_daily_update() -> dict:
+def run_daily_update(detect_only: bool = False) -> dict:
     """
     Execute the full daily update pipeline.
 
@@ -151,19 +157,28 @@ def run_daily_update() -> dict:
         )
         db.prune_page_snapshots(url, keep=settings.snapshot_history)
 
-    # Step 3: Re-ingest updated PDFs and scraped pages
-    logger.info("--- Step 3: Re-ingesting documents ---")
-    try:
-        summary["chunks_ingested"] += reingest_updated_pdfs(db)
-    except Exception as exc:
-        logger.error("PDF re-ingestion failed: {}", exc)
-        summary["errors"].append(f"Re-ingestion: {exc}")
+    # Step 3: Re-ingest updated PDFs and scraped pages.
+    # Skipped when nothing changed, and skippable entirely with --detect-only.
+    # Embedding is the expensive part of the run — it needs PyTorch and the
+    # 420MB model — and re-embedding text identical to what is already indexed
+    # buys nothing. The monitored pages change rarely, so most runs stop here.
+    if detect_only:
+        logger.info("--- Step 3: Skipped (--detect-only) ---")
+    elif not summary["changes_detected"]:
+        logger.info("--- Step 3: Skipped, no content changed ---")
+    else:
+        logger.info("--- Step 3: Re-ingesting documents ---")
+        try:
+            summary["chunks_ingested"] += reingest_updated_pdfs(db)
+        except Exception as exc:
+            logger.error("PDF re-ingestion failed: {}", exc)
+            summary["errors"].append(f"Re-ingestion: {exc}")
 
-    try:
-        summary["chunks_ingested"] += ingest_scraped_pages(results)
-    except Exception as exc:
-        logger.error("Page ingestion failed: {}", exc)
-        summary["errors"].append(f"Page ingestion: {exc}")
+        try:
+            summary["chunks_ingested"] += ingest_scraped_pages(results)
+        except Exception as exc:
+            logger.error("Page ingestion failed: {}", exc)
+            summary["errors"].append(f"Page ingestion: {exc}")
 
     # Step 4: Send alerts for significant changes.
     # Disabled by default (ALERTS_ENABLED). Change notification is parked while
@@ -197,9 +212,45 @@ def run_daily_update() -> dict:
     return summary
 
 
-def main():
-    """Entry point for the daily update script."""
-    summary = run_daily_update()
+def _emit_github_output(summary: dict) -> None:
+    """
+    Write `changed` to $GITHUB_OUTPUT so the workflow can branch on it.
+
+    The expensive half of a run — installing PyTorch, downloading the
+    embedding model, re-indexing, committing — is worth doing only when the
+    site actually changed, which is rarely.
+    """
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    changed = "true" if summary["changes_detected"] else "false"
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(f"changed={changed}\n")
+        fh.write(f"pages_scraped={summary['pages_scraped']}\n")
+    logger.info("GITHUB_OUTPUT: changed={}", changed)
+
+
+def main(argv: list[str] | None = None):
+    """
+    Entry point for the daily update script.
+
+    `argv` is injectable so callers and tests do not have to go through
+    sys.argv, which under pytest carries pytest's own arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="Scrape the monitored pages, detect changes, re-index."
+    )
+    parser.add_argument(
+        "--detect-only",
+        action="store_true",
+        help="Scrape and record changes but skip re-indexing. Lets a caller "
+             "run the cheap half first and only pay for embedding when "
+             "something actually changed.",
+    )
+    args = parser.parse_args(argv)
+
+    summary = run_daily_update(detect_only=args.detect_only)
+    _emit_github_output(summary)
 
     # Print human-readable summary for GitHub Actions
     print("\n" + "=" * 60)

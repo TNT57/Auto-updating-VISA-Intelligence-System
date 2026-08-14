@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for pipeline state persistence, alerting, and severity classification.
 
 These cover the behaviours that make the "auto-updating" claim true:
@@ -248,7 +248,7 @@ class TestRunAccounting:
         }
         with patch.object(du, "run_daily_update", return_value=blocked):
             with pytest.raises(SystemExit) as exc_info:
-                du.main()
+                du.main([])
 
         assert exc_info.value.code == 1
 
@@ -264,7 +264,7 @@ class TestRunAccounting:
             "errors": [],
         }
         with patch.object(du, "run_daily_update", return_value=healthy):
-            du.main()  # must not raise SystemExit
+            du.main([])  # must not raise SystemExit
 
 
 class TestAlertsToggle:
@@ -323,6 +323,86 @@ class TestAlertsToggle:
         from src.utils.config import Settings
 
         assert Settings().alerts_enabled is False
+
+
+class TestDetectOnlyAndCostControl:
+    """
+    Re-indexing needs PyTorch and a 420MB model. The monitored pages change
+    rarely, so a run that finds nothing new must not pay that cost — the CI
+    workflow branches on the `changed` output to decide whether to install
+    the ML dependencies at all.
+    """
+
+    def _run(self, db, content, detect_only=False, previous=None):
+        import scripts.daily_update as du
+
+        if previous is not None:
+            db.save_page_snapshot(url="https://immi.test/fees",
+                                  content=previous, content_hash="h0")
+
+        scraper = MagicMock()
+        scraper.run_daily_scrape.return_value = [{
+            "url": "https://immi.test/fees", "content": content,
+            "content_hash": "h1", "title": "Fees",
+        }]
+
+        with patch.object(du, "DatabaseManager", return_value=db), \
+             patch.object(du, "HomeAffairsScraper", return_value=scraper), \
+             patch.object(du, "reingest_updated_pdfs", return_value=7) as pdfs, \
+             patch.object(du, "ingest_scraped_pages", return_value=9) as pages:
+            summary = du.run_daily_update(detect_only=detect_only)
+        return summary, pdfs, pages
+
+    def test_no_change_skips_reindexing(self, db):
+        summary, pdfs, pages = self._run(
+            db, content="Fee is $2,235.", previous="Fee is $2,235."
+        )
+
+        assert summary["changes_detected"] == 0
+        pdfs.assert_not_called()
+        pages.assert_not_called()
+        assert summary["chunks_ingested"] == 0
+
+    def test_a_real_change_triggers_reindexing(self, db):
+        summary, pdfs, pages = self._run(
+            db, content="Fee is $2,500.", previous="Fee is $2,235."
+        )
+
+        assert summary["changes_detected"] > 0
+        pdfs.assert_called_once()
+        pages.assert_called_once()
+        assert summary["chunks_ingested"] == 16
+
+    def test_detect_only_never_reindexes(self, db):
+        """Even with a change, --detect-only leaves embedding to a later step."""
+        summary, pdfs, pages = self._run(
+            db, content="Fee is $2,500.", previous="Fee is $2,235.",
+            detect_only=True,
+        )
+
+        assert summary["changes_detected"] > 0
+        pdfs.assert_not_called()
+        pages.assert_not_called()
+
+    def test_github_output_reports_whether_anything_changed(self, tmp_path,
+                                                            monkeypatch):
+        import scripts.daily_update as du
+
+        out = tmp_path / "gh_output"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+        du._emit_github_output({"changes_detected": 3, "pages_scraped": 4})
+        assert "changed=true" in out.read_text()
+
+        out.write_text("")
+        du._emit_github_output({"changes_detected": 0, "pages_scraped": 4})
+        assert "changed=false" in out.read_text()
+
+    def test_github_output_is_skipped_outside_ci(self, monkeypatch):
+        import scripts.daily_update as du
+
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        du._emit_github_output({"changes_detected": 1, "pages_scraped": 1})
 
 
 class TestUserAgent:

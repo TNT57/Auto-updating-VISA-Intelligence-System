@@ -58,9 +58,14 @@ data/archives/
 # app starts with an empty knowledge base and can answer nothing. Committing
 # it also makes a deploy reproducible — the app ships the corpus it was
 # tested against. Rebuild with scripts/fetch_and_index.py.
-database/*.db
+# changes.db IS committed. It holds the page snapshots that change detection
+# compares against, so on an ephemeral CI runner an ignored copy means every
+# run re-baselines and reports no changes forever. Committing it also removes
+# the need for a cache that could silently expire and cause the same failure.
+# Snapshots are pruned to SNAPSHOT_HISTORY per URL, so it stays small (~20KB).
 database/vectorstore_old_*/
 !database/.gitkeep
+!database/changes.db
 
 # Local-only Chroma state that must not be committed
 database/vectorstore/*.log

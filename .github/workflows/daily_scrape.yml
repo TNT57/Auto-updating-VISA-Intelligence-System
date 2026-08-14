@@ -1,23 +1,42 @@
 name: Daily Scrape
 
+# Keeps the deployed app's knowledge base current.
+#
+# Cost is the design constraint. The monitored pages change rarely, so the run
+# is split: a cheap scrape-and-compare every day, and the expensive re-index
+# (PyTorch, a 420MB model, a commit) only when the content actually changed.
+# A no-change day never installs an ML dependency.
+#
+# Alerting stays off (ALERTS_ENABLED defaults to false) — the point is a fresh
+# index, not notifications.
+
 on:
   schedule:
-    # Run daily at 2 AM AEST (UTC+10) = 4 PM UTC previous day
+    # 2 AM AEST (UTC+10) = 4 PM UTC the previous day
     - cron: '0 16 * * *'
   workflow_dispatch: # Allow manual trigger
 
-# Needed so the cache can be written back after the run.
+# Needed by the commit step, which is what carries a refreshed index through
+# to the deployed app.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  # Two overlapping runs would race on the snapshot state.
+  # Two overlapping runs would race on the snapshot state and the commit.
   group: daily-scrape
   cancel-in-progress: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+
+    env:
+      # No alerts, so severity never needs an LLM. Keeps the run off the Groq
+      # quota entirely; the keyword classifier is enough for the Changes page.
+      MAX_LLM_CLASSIFICATIONS: '0'
+      # The Home Affairs pages render client-side; a plain fetch returns an
+      # empty shell.
+      SCRAPER_BACKEND: browser
 
     steps:
       - name: Checkout repository
@@ -29,43 +48,70 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # ------------------------------------------------------------------
-      # Change detection is only possible if state survives between runs.
-      # The runner is ephemeral and database/ is gitignored, so without this
-      # every run would start from an empty DB, re-baseline, and report zero
-      # changes forever. changes.db holds both the page snapshots and the
-      # PDF ingestion hashes, so it is the only state that must persist.
-      # ------------------------------------------------------------------
-      - name: Restore pipeline state
+      # ---- Cheap path: scrape and compare -------------------------------
+      # Scraping dependencies only. Notably absent: chromadb,
+      # sentence-transformers and PyTorch, which dominate install time.
+      - name: Install scraping dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "scrapling[fetchers]>=0.4.14" "playwright>=1.40.0" \
+            beautifulsoup4 lxml httpx \
+            pydantic pydantic-settings python-dotenv sqlalchemy loguru tenacity
+
+      - name: Cache Chromium
+        id: browser-cache
         uses: actions/cache@v4
         with:
-          path: |
-            database/changes.db
-            data/raw/pdfs
-          key: visa-state-${{ github.run_id }}
-          restore-keys: |
-            visa-state-
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+
+      - name: Install Chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Install Chromium system libraries
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: python -m playwright install-deps chromium
+
+      - name: Scrape and detect changes
+        id: detect
+        run: python scripts/daily_update.py --detect-only
+
+      # ---- Expensive path: only when the site actually changed -----------
+      - name: Install indexing dependencies
+        if: steps.detect.outputs.changed == 'true'
+        run: pip install -r requirements.txt
 
       - name: Cache embedding model
+        if: steps.detect.outputs.changed == 'true'
         uses: actions/cache@v4
         with:
           path: .cache/huggingface
           key: hf-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            hf-
+          restore-keys: hf-
 
-      - name: Install dependencies
+      - name: Re-index changed content
+        if: steps.detect.outputs.changed == 'true'
+        run: python scripts/fetch_and_index.py
+
+      # The deployed app reads the committed index, so a refresh only reaches
+      # production by being committed. Pushing also triggers a Streamlit Cloud
+      # redeploy.
+      - name: Commit refreshed index
+        if: steps.detect.outputs.changed == 'true'
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add database/vectorstore database/changes.db
+          if git diff --staged --quiet; then
+            echo "Index unchanged after re-run; nothing to commit."
+          else
+            git commit -m "chore: refresh knowledge base $(date -u +%Y-%m-%d)"
+            git push
+          fi
 
-      - name: Run daily update
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python scripts/daily_update.py
-
-      - name: Upload run artifacts
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
