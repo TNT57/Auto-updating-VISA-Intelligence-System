@@ -199,6 +199,54 @@ class HomeAffairsScraper:
     # "" — which is exactly what an unrendered JS page looks like.
     MIN_CONTENT_CHARS = 200
 
+    # Site chrome that survives the container selectors: the persistent header
+    # links and accessibility affordances present on every page. Left in, they
+    # led 59 of 232 page chunks, wasting context and pulling every chunk's
+    # embedding toward the same meaningless centroid. Matched as whole lines,
+    # case-insensitively, so body text that happens to mention ImmiAccount in
+    # a sentence is preserved.
+    BOILERPLATE_LINES = frozenset(x.lower() for x in (
+        "ImmiAccount",
+        "Visa Entitlement Verification Online (VEVO)",
+        "VEVO",
+        "My Tourist Refund Scheme (TRS)",
+        "Skip to navigation",
+        "Skip to main content",
+        "Select language",
+        "Menu",
+        "Home Affairs Portfolio",
+        "Immigration and citizenship",
+        "Search",
+        "Popular searches",
+        "Your previous searches",
+        "pop-up content starts",
+        "pop-up content ends",
+        "Need a hand?",
+        "Cancel",
+        "Print this page",
+        "Loading",
+        "Show",
+        "See how",
+        "Back",
+        "×",
+    ))
+
+    @classmethod
+    def _strip_boilerplate(cls, text: str) -> str:
+        """
+        Drop site-chrome lines and zero-width characters.
+
+        Operates line-wise because the extracted text is one fragment per
+        element; a substring filter would corrupt real sentences.
+        """
+        kept = []
+        for line in text.split("\n"):
+            cleaned = line.replace("​", "").replace("﻿", "").strip()
+            if not cleaned or cleaned.lower() in cls.BOILERPLATE_LINES:
+                continue
+            kept.append(cleaned)
+        return "\n".join(kept)
+
     @staticmethod
     def _extract_content(soup: BeautifulSoup) -> str:
         """
@@ -207,6 +255,7 @@ class HomeAffairsScraper:
         Tries known Home Affairs content containers in order, skipping any that
         match but are empty, and falls back to <body> stripped of chrome.
         """
+        cls = HomeAffairsScraper
         best = ""
 
         for selector in (
@@ -225,8 +274,10 @@ class HomeAffairsScraper:
             for tag in container.select("nav, footer, .sidebar, .breadcrumb, .menu"):
                 tag.decompose()
 
-            text = container.get_text(separator="\n", strip=True)
-            if len(text) >= HomeAffairsScraper.MIN_CONTENT_CHARS:
+            text = cls._strip_boilerplate(
+                container.get_text(separator="\n", strip=True)
+            )
+            if len(text) >= cls.MIN_CONTENT_CHARS:
                 return text
             # Matched but thin — keep the best candidate and keep looking.
             if len(text) > len(best):
@@ -240,7 +291,9 @@ class HomeAffairsScraper:
         if body:
             for tag in body.select("nav, footer, header, .sidebar, .menu, script, style"):
                 tag.decompose()
-            return body.get_text(separator="\n", strip=True)
+            return cls._strip_boilerplate(
+                body.get_text(separator="\n", strip=True)
+            )
 
         return soup.get_text(separator="\n", strip=True)
 

@@ -14,12 +14,33 @@ from src.utils.config import settings
 from src.utils.db_manager import DatabaseManager
 
 
+def is_relevant_pdf(pages: list, keywords: list[str] | None = None) -> bool:
+    """
+    Whether an extracted PDF is about the visa rather than generic paperwork.
+
+    Home Affairs pages link their universal application forms (80, 1221, 956,
+    47a...) from every visa page. Those are form-filling instructions, not
+    policy, and indexing them contributed over half the corpus while mentioning
+    the visa zero times. Judged on extracted text rather than a filename
+    denylist, so a renamed or newly-linked form is handled too.
+    """
+    keywords = (
+        settings.pdf_relevance_keywords if keywords is None else keywords
+    )
+    if not keywords:
+        return True
+
+    blob = " ".join(p.content for p in pages).lower()
+    return any(kw.lower() in blob for kw in keywords)
+
+
 def ingest_pdfs(db: DatabaseManager, pdf_dir: Path | None = None) -> int:
     """
     Ingest new or changed PDFs into ChromaDB.
 
     A PDF whose hash matches the recorded one is skipped, so re-running this is
-    cheap. Returns the number of chunks added.
+    cheap. PDFs that fail the relevance check are skipped entirely. Returns the
+    number of chunks added.
     """
     from src.ingestion.pdf_loader import PDFLoader
     from src.ingestion.text_chunker import TextChunker
@@ -58,6 +79,15 @@ def ingest_pdfs(db: DatabaseManager, pdf_dir: Path | None = None) -> int:
         if not pages:
             logger.warning("No text extracted from {} — scanned image?",
                            pdf_path.name)
+            continue
+
+        if not is_relevant_pdf(pages):
+            logger.info(
+                "Skipping {} — no mention of {}; generic form, not policy",
+                pdf_path.name, settings.pdf_relevance_keywords,
+            )
+            # Drop any chunks indexed before the filter existed.
+            vs.delete_document(pdf_path.name)
             continue
 
         chunks = chunker.chunk_document(pages)

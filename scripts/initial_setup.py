@@ -84,17 +84,24 @@ def check_pdfs() -> bool:
 
 
 def build_vectorstore(rebuild: bool = False) -> bool:
-    """Build the vector database from PDF documents."""
+    """
+    Build the vector database from local PDF documents.
+
+    Delegates to src.ingestion.pipeline so this shares one code path with
+    fetch_and_index and daily_update. It previously chunked and added PDFs
+    itself, which meant --rebuild silently re-indexed the generic application
+    forms that the pipeline's relevance filter exists to exclude.
+    """
     try:
-        from src.ingestion.pdf_loader import PDFLoader
-        from src.ingestion.text_chunker import TextChunker
+        from src.ingestion.pipeline import ingest_pdfs
         from src.ingestion.vectorstore_manager import VectorStoreManager
+        from src.utils.db_manager import DatabaseManager
 
         print("\n📚 Building vector database...")
 
+        vs = VectorStoreManager()
         if rebuild:
             print("   Rebuilding: dropping the existing collection first...")
-            vs = VectorStoreManager()
             try:
                 vs.reset_collection()
                 print("   ✅ Collection reset")
@@ -102,28 +109,27 @@ def build_vectorstore(rebuild: bool = False) -> bool:
                 # Nothing to drop on a first run.
                 print(f"   ℹ️  Nothing to reset ({exc})")
 
-        # Step 1: Load PDFs
-        print("   Step 1/3: Extracting text from PDFs...")
-        loader = PDFLoader()
-        pages = loader.load_all_pdfs()
+        db = DatabaseManager()
+        db.create_tables()
 
-        if not pages:
-            print("   ❌ No content extracted from PDFs")
-            return False
-        print(f"   ✅ Extracted {len(pages)} pages")
+        if rebuild:
+            # The collection is gone, so the recorded file hashes would
+            # otherwise make every PDF look "already ingested" and skip it.
+            from src.utils.db_manager import Document
 
-        # Step 2: Chunk text
-        print("   Step 2/3: Chunking text...")
-        chunker = TextChunker()
-        chunks = chunker.chunk_document(pages)
-        print(f"   ✅ Created {len(chunks)} chunks")
+            with db.get_session() as session:
+                session.query(Document).delete()
+                session.commit()
 
-        # Step 3: Add to vectorstore
-        print("   Step 3/3: Building embeddings and storing in ChromaDB...")
-        vs = VectorStoreManager()
-        vs.add_chunks(chunks)
+        print("   Extracting, filtering and indexing PDFs...")
+        added = ingest_pdfs(db)
+
         stats = vs.get_collection_stats()
-        print(f"   ✅ Vector database built: {stats['total_chunks']} chunks")
+        print(f"   ✅ Added {added} chunks "
+              f"({stats['total_chunks']} total in collection)")
+        if added == 0:
+            print("   ℹ️  No relevant PDFs found. Generic application forms "
+                  "are skipped by design; see PDF_RELEVANCE_KEYWORDS.")
 
         return True
 

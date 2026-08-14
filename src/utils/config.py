@@ -87,12 +87,42 @@ class Settings(BaseSettings):
 
     # ---- Application Settings ----
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-    chroma_persist_dir: str = Field(
+    # Stored as given, but always read through the property below.
+    chroma_persist_dir_raw: str = Field(
         default=str(BASE_DIR / "database" / "vectorstore"),
         alias="CHROMA_PERSIST_DIR",
     )
+
+    @property
+    def chroma_persist_dir(self) -> str:
+        """
+        Absolute path to the vector store.
+
+        A relative CHROMA_PERSIST_DIR (the shipped .env.example used
+        "database/vectorstore") otherwise resolves against the current working
+        directory, so running the same script from the project root and from
+        .venv/ silently creates two separate indexes. That is not a
+        hypothetical: it produced a 478-chunk index under .venv/ while the
+        project root still held a stale 12-chunk one, and the mismatch only
+        surfaced as "expecting embedding with dimension of 384, got 768".
+        Relative values are resolved against the project root instead.
+        """
+        path = Path(self.chroma_persist_dir_raw)
+        return str(path if path.is_absolute() else (BASE_DIR / path).resolve())
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
     chunk_overlap: int = Field(default=200, alias="CHUNK_OVERLAP")
+
+    # ---- PDF relevance ----
+    # Pages link to Home Affairs' generic application forms (80, 1221, 956,
+    # 47a...). Indexed, they contributed 246 of 478 chunks — over half the
+    # corpus — while mentioning "485" or "Temporary Graduate" exactly zero
+    # times. They are form-filling boilerplate, not policy, and they crowd
+    # out real answers. A PDF is indexed only if its text mentions one of
+    # these. Set PDF_RELEVANCE_KEYWORDS empty to index every PDF.
+    pdf_relevance_keywords: list[str] = Field(
+        default=["485", "temporary graduate"],
+        alias="PDF_RELEVANCE_KEYWORDS",
+    )
 
     # ---- Retrieval ----
     # Query expansion strategy: llm | synonyms | none. Measured on the 10

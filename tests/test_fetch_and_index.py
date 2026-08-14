@@ -193,6 +193,15 @@ class TestSharedIngestion:
         assert du.reingest_updated_pdfs is ingest_pdfs
         assert du.ingest_scraped_pages is ingest_pages
 
+    @staticmethod
+    def _write_pdf(path, text):
+        fpdf = pytest.importorskip("fpdf")
+        doc = fpdf.FPDF()
+        doc.add_page()
+        doc.set_font("Helvetica", size=12)
+        doc.multi_cell(0, 8, text, new_x="LMARGIN", new_y="NEXT")
+        doc.output(str(path))
+
     def test_pdf_ingest_skips_unchanged_files(self, tmp_path):
         from src.ingestion.pipeline import ingest_pdfs
         from src.utils.db_manager import DatabaseManager
@@ -202,13 +211,9 @@ class TestSharedIngestion:
 
         pdf_dir = tmp_path / "pdfs"
         pdf_dir.mkdir()
-        fpdf = pytest.importorskip("fpdf")
-        doc = fpdf.FPDF()
-        doc.add_page()
-        doc.set_font("Helvetica", size=12)
-        doc.multi_cell(0, 8, "The visa fee is AUD 2,235.",
-                       new_x="LMARGIN", new_y="NEXT")
-        doc.output(str(pdf_dir / "fees.pdf"))
+        # Must mention the visa or the relevance filter skips it.
+        self._write_pdf(pdf_dir / "fees.pdf",
+                        "Temporary Graduate visa subclass 485. Fee AUD 2,235.")
 
         with patch("src.ingestion.vectorstore_manager.VectorStoreManager") as vs:
             vs.return_value.add_chunks.return_value = 1
@@ -217,3 +222,111 @@ class TestSharedIngestion:
 
         assert first > 0
         assert second == 0, "unchanged PDF should not be re-ingested"
+
+
+class TestPdfRelevanceFilter:
+    """
+    Generic application forms (80, 1221, 956, 47a...) are linked from every
+    visa page. Indexed, they were 246 of 478 chunks while mentioning the visa
+    zero times, crowding out real policy text.
+    """
+
+    def _pages(self, text):
+        from src.ingestion.pdf_loader import DocumentChunk
+
+        return [DocumentChunk(content=text, source="f.pdf", page_number=1,
+                              chunk_index=0, doc_type="pdf")]
+
+    def test_generic_form_is_rejected(self):
+        from src.ingestion.pipeline import is_relevant_pdf
+
+        form80 = ("Form 80 Personal particulars for character assessment. "
+                  "Give details of all countries you have lived in.")
+        assert is_relevant_pdf(self._pages(form80)) is False
+
+    def test_visa_document_is_kept(self):
+        from src.ingestion.pipeline import is_relevant_pdf
+
+        assert is_relevant_pdf(
+            self._pages("Temporary Graduate visa holders may work.")) is True
+
+    def test_subclass_number_alone_is_enough(self):
+        from src.ingestion.pipeline import is_relevant_pdf
+
+        assert is_relevant_pdf(self._pages("Subclass 485 conditions.")) is True
+
+    def test_matching_is_case_insensitive(self):
+        from src.ingestion.pipeline import is_relevant_pdf
+
+        assert is_relevant_pdf(self._pages("TEMPORARY GRADUATE VISA")) is True
+
+    def test_empty_keyword_list_keeps_everything(self):
+        """Escape hatch: PDF_RELEVANCE_KEYWORDS= indexes every PDF."""
+        from src.ingestion.pipeline import is_relevant_pdf
+
+        assert is_relevant_pdf(self._pages("Form 80"), keywords=[]) is True
+
+    def test_irrelevant_pdf_is_not_ingested(self, tmp_path):
+        from src.ingestion.pipeline import ingest_pdfs
+        from src.utils.db_manager import DatabaseManager
+
+        db = DatabaseManager(db_path=str(tmp_path / "t.db"))
+        db.create_tables()
+        pdf_dir = tmp_path / "pdfs"
+        pdf_dir.mkdir()
+        TestSharedIngestion._write_pdf(
+            pdf_dir / "80.pdf",
+            "Form 80 Personal particulars for character assessment.")
+
+        with patch("src.ingestion.vectorstore_manager.VectorStoreManager") as vs:
+            added = ingest_pdfs(db, pdf_dir=pdf_dir)
+
+        assert added == 0
+        vs.return_value.add_chunks.assert_not_called()
+        # Chunks indexed before the filter existed must be cleaned up.
+        vs.return_value.delete_document.assert_called_with("80.pdf")
+
+
+class TestBoilerplateStripping:
+    """
+    Site chrome led 59 of 232 page chunks, wasting context and dragging every
+    chunk's embedding toward the same meaningless centroid.
+    """
+
+    def test_chrome_lines_are_removed(self):
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        raw = ("ImmiAccount\nVEVO\nMy Tourist Refund Scheme (TRS)\n"
+               "You must be aged 35 years or under when you apply.")
+        out = HomeAffairsScraper._strip_boilerplate(raw)
+
+        assert "ImmiAccount" not in out
+        assert "VEVO" not in out
+        assert "aged 35 years or under" in out
+
+    def test_real_sentences_mentioning_chrome_survive(self):
+        """Line-wise, not substring — or real content gets mangled."""
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        raw = "Log in to ImmiAccount to check your application status."
+        assert HomeAffairsScraper._strip_boilerplate(raw) == raw
+
+    def test_zero_width_characters_are_stripped(self):
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        out = HomeAffairsScraper._strip_boilerplate("​​Stay period​")
+        assert out == "Stay period"
+
+    def test_extraction_applies_the_filter(self):
+        from bs4 import BeautifulSoup
+
+        from src.scraping.homeaffairs_scraper import HomeAffairsScraper
+
+        html = ("<html><body><div id='contentBox'>"
+                "<p>ImmiAccount</p><p>VEVO</p>"
+                f"<p>{'The visa costs AUD5,750.00. ' * 12}</p>"
+                "</div></body></html>")
+        text = HomeAffairsScraper._extract_content(BeautifulSoup(html, "lxml"))
+
+        assert "ImmiAccount" not in text
+        assert "AUD5,750.00" in text
