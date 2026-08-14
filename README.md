@@ -114,32 +114,35 @@ end-to-end.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Streamlit Dashboard                    │
-│         ┌──────────┬──────────┬───────────┐             │
-│         │   Chat   │ Changes  │  Alerts   │             │
-│         └────┬─────┴────┬─────┴─────┬─────┘             │
-└──────────────┼──────────┼───────────┼───────────────────┘
-               │          │           │
-       ┌───────▼──┐  ┌────▼────┐  ┌──▼──────────┐
-       │   RAG    │  │ Change  │  │   Alert     │
-       │ Pipeline │  │ Detector│  │  Manager    │
-       └────┬─────┘  └────┬────┘  └─────────────┘
-            │             │
-    ┌───────▼─────┐  ┌────▼────────┐
-    │  ChromaDB   │  │   SQLite    │
-    │  (Vectors)  │  │ (Snapshots) │
-    └──────▲──────┘  └────▲────────┘
-           │              │
-    ┌──────▼──────────────▼──────┐
-    │     Ingestion Pipeline     │
-    │  PDF Load → Chunk → Embed  │
-    └──────────────▲─────────────┘
-                   │
-         ┌─────────▼──────────┐
-         │   Web Scraper      │──── GitHub Actions (daily)
-         │   (Home Affairs)   │
-         └────────────────────┘
+  ASKING                                    KEEPING IT CURRENT
+  ──────                                    ──────────────────
+  Your question                             GitHub Actions, 2am daily
+        │                                            │
+        ▼                                            ▼
+  ┌───────────────────┐                   ┌────────────────────┐
+  │ Query expansion   │  rewrite into     │ Browser scraper    │
+  │ + rank fusion     │  several          │ (Playwright —      │
+  └─────────┬─────────┘  phrasings        │  the site is JS)   │
+            │                             └─────────┬──────────┘
+            ▼                                       ▼
+  ┌───────────────────┐                   ┌────────────────────┐
+  │ ChromaDB          │◀──── re-embed ────│ Changed?  ──no──▶ stop
+  │ 226 chunks        │      only if      │ (diff vs snapshot) │  (~80s,
+  │ (committed)       │      changed      └─────────┬──────────┘   no ML)
+  └─────────┬─────────┘                             │ yes
+            │ top passages                          ▼
+            ▼                                  commit + push
+  ┌───────────────────┐                             │
+  │ Llama 3.3 70B     │                             ▼
+  │ answer + cite     │                    Streamlit redeploys
+  └─────────┬─────────┘
+            ▼
+  ┌───────────────────┐
+  │ Grounding check   │  re-reads the answer against
+  │ GROUNDED / not    │  the same passages
+  └─────────┬─────────┘
+            ▼
+     Answer + source links
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical breakdown.
@@ -148,22 +151,25 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical breakd
 
 | Category | Tools |
 |---|---|
-| **LLM & RAG** | langchain-text-splitters, Groq (Llama 3.3), SentenceTransformers |
-| **Vector DB** | ChromaDB |
-| **Data Processing** | pdfplumber, pypdf, BeautifulSoup4, pandas |
-| **Backend** | Python, SQLAlchemy, httpx |
-| **Frontend** | Streamlit (multi-page), Plotly |
+| **LLM & RAG** | Groq (Llama 3.3 70B), SentenceTransformers (`all-mpnet-base-v2`), langchain-text-splitters |
+| **Vector DB** | ChromaDB (cosine) |
+| **Scraping** | Scrapling + Playwright Chromium (the site is JS-rendered), BeautifulSoup4 |
+| **Data Processing** | pdfplumber, pypdf, pandas |
+| **Backend** | Python 3.10+, SQLAlchemy, httpx, Pydantic Settings |
+| **Frontend** | Streamlit, Plotly |
 | **Database** | SQLite |
 | **CI/CD** | GitHub Actions, pytest, ruff |
-| **Alerts** | Discord Webhooks |
+| **Alerts** | Discord webhooks *(built, parked)* |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.10+
-- A free [Groq API key](https://console.groq.com/keys) (for LLM-powered chat)
-- Australian visa PDF documents (see step 4)
+- A free [Groq API key](https://console.groq.com/keys) — for the chat only;
+  ingestion and retrieval run entirely locally
+- Chromium for scraping: `python -m playwright install chromium`. Not needed
+  to query the prebuilt index that ships with the repo
 
 ### Setup
 
@@ -295,9 +301,9 @@ Cache directories are configured in two places so they always point inside the p
 | Vector store (ChromaDB) | ✅ Working | Cosine distance, `all-mpnet-base-v2` |
 | RAG retrieval pipeline | ✅ Working | |
 | LLM chat (Groq) | ✅ Working | Streaming, conversation memory, grounding check |
-| Streamlit dashboard | ✅ Working | Chat and Changes pages |
-| Web scraper | ✅ Working | 4 monitored URLs, conditional GET for PDFs |
-| Change detection | ✅ Working | Snapshots persist in SQLite |
+| Streamlit dashboard | ✅ Working | Chat only in public mode; Home/Changes/Alerts with `PUBLIC_MODE=false` |
+| Web scraper | ✅ Working | Browser-rendered; 4 seed URLs, 7 pages with `--crawl` |
+| Change detection | ✅ Working | Snapshots committed in `database/changes.db` |
 | Alert system (Discord) | ⏸️ Built, parked | Working and tested, but off by default — set `ALERTS_ENABLED=true` |
 | Email alerts | ❌ Not implemented | SMTP settings exist in config but are unused |
 | Alerts config page | ⚠️ Read-only | Shows status; configure via `.env`, not the UI |
@@ -317,102 +323,114 @@ Cache directories are configured in two places so they always point inside the p
   times and the full fee schedule live elsewhere, so those questions get an
   honest "not in the provided documents" rather than an answer.
 
-To run it yourself:
-1. Add a `GROQ_API_KEY` to your `.env` file (free at [console.groq.com](https://console.groq.com/keys))
-2. Place at least one PDF document in `data/raw/pdfs/`
-3. Run `python scripts/initial_setup.py` to build the vector database
-4. Launch with `streamlit run app/streamlit_app.py`
+To run it yourself, follow [Setup](#setup) above — in short: create the venv,
+add a `GROQ_API_KEY` to `.env`, run `python scripts/fetch_and_index.py --crawl`,
+then `streamlit run app/streamlit_app.py`. The repository ships a prebuilt
+index, so the fetch step is only needed to refresh it.
 
-> **Upgrading an existing install?** The vector collection now uses cosine
-> distance instead of Chroma's default squared-L2. Rebuild it once with
-> `python scripts/initial_setup.py --rebuild`, otherwise relevance scores will
-> keep reading 0%.
+> **Upgrading an install from before August 2026?** The vector collection now
+> uses cosine distance instead of Chroma's default squared-L2, and the
+> embedding model changed. Rebuild once with
+> `python scripts/initial_setup.py --rebuild` followed by
+> `python scripts/fetch_and_index.py --crawl`, otherwise relevance scores read
+> 0% or the collection rejects queries on a dimension mismatch.
 
-### Troubleshooting the daily scrape
+### Why the scrape failed for four months
 
-**"Daily Scrape" emails you a failure every day.** Two separate causes:
+Every scheduled run from April to June failed. Three independent causes, and
+none was what it first appeared to be — worth recording because two plausible
+diagnoses were wrong.
 
-1. **`git push` denied to `github-actions[bot]` (exit 128).** This is what
-   actually failed the job. The workflow tried to commit results back to the
-   repo without `permissions: contents: write` — and everything it tried to
-   commit was gitignored anyway. **Fixed:** the push step is gone; state is
-   cached instead.
-2. **All four URLs returned `403 Forbidden`** on the runner. **Not fixed, and
-   not fixable from GitHub Actions** — see below.
+1. **A single word in the User-Agent.** `USER_AGENT` was
+   `Visa485IntelligenceBot/1.0`, and the site's WAF returns 403 to any agent
+   string containing "Bot" or "Crawler". Verified by repeated trial:
+   `Visa485IntelligenceBot/1.0` and `MyCrawler/1.0` 403 every time, while
+   `VisaWatch/1.0`, `curl` and plain `python-httpx` all return 200. The default
+   is now an honest identifier with a contact URL and no blocked keyword.
 
-The run also used to count blocked pages as "scraped", so it reported
-`Pages scraped: 4` on a run that fetched nothing. It now counts only real
-successes and **exits non-zero if no page was fetched** — a monitoring job
-that silently goes green is worse than one that fails.
+   *A bare `curl` succeeding from a home connection while the runner 403'd
+   looked like an IP block. It was not — `curl` simply does not call itself a
+   bot. GitHub Actions was never the problem, and the workflow now runs green.*
 
-### The 403 is an IP block, not a header problem
+2. **Three of the four monitored URLs had 404'd.** Home Affairs restructured
+   the 485 content into stream sub-pages; `documents-you-need`, `visa-fees` and
+   `global-processing-times` no longer exist and do not redirect.
 
-A bare `curl` with no special headers succeeds from a residential connection
-but the same request 403s from a GitHub Actions runner. That rules out user
-agent and header fingerprinting: the site is refusing the runner's **network**,
-whether by datacenter IP range or geography.
+3. **`git push` denied to `github-actions[bot]`** (exit 128) — the workflow
+   pushed without `permissions: contents: write`. That is what generated the
+   daily failure email.
 
-Consequences:
-
-- No fetch backend fixes this on GitHub Actions. `scrapling` changes the TLS
-  fingerprint, not the source IP.
-- **Run the pipeline where the IP is not blocked.** On Windows, Task Scheduler
-  running `python scripts/daily_update.py` daily; on macOS/Linux, cron. The
-  scheduled workflow is best treated as disabled until then.
-- If CI-based scraping is genuinely needed later, the fix is a fetch that
-  *originates elsewhere* — a hosted scraping API or an egress proxy. The
-  `BaseFetcher` interface in `src/scraping/fetchers.py` exists so that can be
-  added without touching the scraper or the pipeline.
+The run also counted blocked pages as "scraped", reporting `Pages scraped: 4`
+on a run that fetched nothing. It now counts only real successes and **exits
+non-zero if no page was fetched** — a monitoring job that silently goes green
+is worse than one that fails.
 
 ### Fetch backends
+
+The Home Affairs pages build their content client-side: a plain HTTP fetch
+returns 1.2MB of HTML holding about 1,400 characters of text, all navigation,
+with the body reading "Loading". Rendered in a browser the same page yields
+about 8,000 characters. **A browser is not optional for this site** — the HTTP
+backends return pages that look successful and are empty.
 
 `SCRAPER_BACKEND` selects how pages are fetched:
 
 | Value | Behaviour |
 |---|---|
-| `auto` (default) | Use `scrapling` if installed, else `httpx` |
-| `httpx` | Plain HTTP. Sufficient from an unblocked IP |
-| `scrapling` | Browser TLS impersonation via curl_cffi, for stricter fingerprint checks |
+| `auto` (default) | `browser` if Chromium is present, else `scrapling`, else `httpx` |
+| `browser` | Playwright Chromium via Scrapling's `DynamicFetcher`. Renders JavaScript |
+| `scrapling` | Browser TLS impersonation via curl_cffi. No JS rendering |
+| `httpx` | Plain HTTP |
 
-An unavailable or misspelled backend falls back to `httpx` with a warning
-rather than failing the run. Scrapling is optional — if it isn't installed,
-everything still works.
+An unavailable or misspelled backend degrades with a loud warning rather than
+failing the run — but on this site a degraded fetch means empty pages, not
+merely slower ones. Install the browser with
+`python -m playwright install chromium`.
 
 ### How the daily update stays stateful
 
 Change detection only works if the previous scrape survives to the next run.
 Page snapshots and PDF ingestion hashes both live in `database/changes.db`,
-which the GitHub Actions workflow restores from cache at the start of every
-run. That single file is the only state the pipeline needs; the HTML files
-under `data/raw/html_snapshots/` are a local archive, not the source of truth.
+which is **committed to the repository**. On an ephemeral runner an ignored
+copy means every run re-baselines and reports no changes forever, which was
+the original bug; a cache would work until it silently expired and
+reintroduced it. The checkout already restores the last committed state, which
+is the correct baseline. Snapshots are pruned to `SNAPSHOT_HISTORY` per URL, so
+the file stays around 20KB.
 
 ## Project Structure
 
 ```
-├── app/                        # Streamlit dashboard
-│   ├── streamlit_app.py        # Main entry point & sidebar
-│   └── pages/
-│       ├── 1_Chat.py           # RAG-powered Q&A
-│       ├── 2_Changes.py        # Change detection timeline
-│       └── 3_Alerts.py         # Alert configuration
+├── app/                        # Streamlit UI
+│   ├── streamlit_app.py        # Router — decides which pages exist
+│   ├── bootstrap.py            # Bridges st.secrets into the environment
+│   └── pages/                  # Home, Chat, Changes, Alerts
 ├── src/
-│   ├── ingestion/              # PDF loading, chunking, vector store
-│   ├── retrieval/              # Semantic search & retrieval
-│   ├── generation/             # LLM client & prompt templates
-│   ├── scraping/               # Home Affairs web scraper
-│   ├── monitoring/             # Change detection engine
-│   ├── alerts/                 # Notification manager
-│   └── utils/                  # Config, logging, database
+│   ├── ingestion/              # models, pdf_loader, text_chunker,
+│   │                           #   vectorstore_manager, pipeline
+│   ├── retrieval/              # retriever, query_expansion
+│   ├── generation/             # llm_client, prompt_templates
+│   ├── scraping/               # homeaffairs_scraper, fetchers (pluggable)
+│   ├── monitoring/             # change_detector
+│   ├── alerts/                 # alert_manager (parked)
+│   └── utils/                  # config, logging, db_manager
 ├── scripts/
-│   ├── fetch_and_index.py      # Fetch the live site + PDFs → index for RAG
-│   ├── initial_setup.py        # First-time setup (--rebuild to reset the vector DB)
-│   └── daily_update.py         # Scrape → detect changes → re-ingest → alert
+│   ├── fetch_and_index.py      # Fetch the live site → index for RAG
+│   ├── inspect_pipeline.py     # Print each stage's real output
+│   ├── eval_retrieval.py       # Score retrieval (hit@k, MRR)
+│   ├── initial_setup.py        # Local PDFs only (--rebuild resets the store)
+│   ├── daily_update.py         # Scrape → detect → re-index (--detect-only)
+│   └── create_sample_pdf.py    # Synthetic test PDF — content is invented
+├── database/
+│   ├── vectorstore/            # ChromaDB — committed, ships with the app
+│   └── changes.db              # Page snapshots — committed, the diff baseline
 ├── .github/workflows/
-│   ├── daily_scrape.yml        # Automated daily scraping
+│   ├── daily_scrape.yml        # Detect daily; re-index only on change
 │   └── tests.yml               # pytest + ruff on every push
 ├── docs/
-│   └── ARCHITECTURE.md         # Detailed architecture docs
-└── tests/                      # Unit + integration tests
+│   ├── ARCHITECTURE.md         # Technical breakdown
+│   └── PIPELINE_WALKTHROUGH.txt # Plain-language tour with real output
+└── tests/                      # 216 unit + 30 integration
 ```
 
 ## Development
@@ -425,11 +443,20 @@ ruff check .                # lint
 
 ## What I Learned
 
-- Building an end-to-end RAG pipeline — from raw PDFs to grounded AI answers
-- Trade-offs in chunking strategies and embedding models for document retrieval
-- Web scraping with change detection and snapshot diffing
-- Using free-tier LLM APIs (Groq) for production-quality inference
-- Scheduling automated data pipelines with GitHub Actions
+- **Retrieval quality is usually not the embedding model.** The same passage
+  ranked 1st at 62% and 3rd at 25% depending only on how the question was
+  worded. Rewriting the query and fusing the rankings fixed what a bigger model
+  would not have.
+- **Measure before optimising.** `eval_retrieval.py` decided every retrieval
+  change; one "obvious" improvement made the unexpanded baseline worse.
+- **A monitoring job that silently goes green is worse than one that fails.**
+  The scrape counted blocked pages as successes and reported "4 pages scraped"
+  on runs that fetched nothing.
+- **Verify against the real thing.** Mocked tests passed for months while the
+  pipeline had never once fetched a page — the User-Agent contained "Bot" and
+  the site's WAF refused it.
+- **Corpus quality beats retrieval tuning.** Generic application forms were 246
+  of 478 chunks; removing them moved hit@1 from 60% to 80%.
 
 ## License
 
