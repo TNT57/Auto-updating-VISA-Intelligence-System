@@ -12,7 +12,9 @@ from chromadb.utils import embedding_functions
 from loguru import logger
 from transformers import logging as tf_logging
 
-from src.ingestion.pdf_loader import DocumentChunk
+# models, not pdf_loader: importing the dataclass must not require pdfplumber,
+# which the deployed app does not install.
+from src.ingestion.models import DocumentChunk
 from src.utils.config import settings
 
 

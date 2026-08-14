@@ -6,24 +6,18 @@ Preserves source information for citation in RAG responses.
 """
 
 import hashlib
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pdfplumber
 from loguru import logger
 
+# Re-exported for existing callers. DocumentChunk itself lives in models.py so
+# that importing the dataclass does not require pdfplumber — the retrieval
+# path needs the former and not the latter.
+from src.ingestion.models import DocumentChunk
 from src.utils.config import settings
 
-
-@dataclass
-class DocumentChunk:
-    """A chunk of text extracted from a document with metadata."""
-    content: str
-    source: str               # File name or URL
-    page_number: int | None   # Page number (for PDFs)
-    chunk_index: int          # Index within the document
-    doc_type: str             # "pdf", "html", "text"
-    metadata: dict = field(default_factory=dict)
+__all__ = ["DocumentChunk", "PDFLoader"]
 
 
 class PDFLoader:
