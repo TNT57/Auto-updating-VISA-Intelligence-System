@@ -16,6 +16,16 @@ from src.generation.prompt_templates import (
 )
 from src.utils.config import settings
 
+# Generation parameters, declared once. These were previously hardcoded in two
+# places — generate() and stream_answer() — which could drift apart silently
+# while only the streaming path is user-facing.
+#
+# Note max_tokens is a ceiling, not a brevity control: lowering it truncates an
+# answer mid-sentence rather than producing a shorter one. Answer length is
+# steered by the prompt, not here.
+ANSWER_MAX_TOKENS = 2048
+ANSWER_TEMPERATURE = 0.3
+
 
 class LLMClient:
     """LLM client with abstraction for multiple providers."""
@@ -62,8 +72,8 @@ class LLMClient:
         self,
         prompt: str,
         system_prompt: str | None = None,
-        max_tokens: int = 2048,
-        temperature: float = 0.3,
+        max_tokens: int = ANSWER_MAX_TOKENS,
+        temperature: float = ANSWER_TEMPERATURE,
     ) -> str:
         """
         Generate a response from the LLM.
@@ -162,8 +172,8 @@ class LLMClient:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=2048,
-                temperature=0.3,
+                max_tokens=ANSWER_MAX_TOKENS,
+                temperature=ANSWER_TEMPERATURE,
                 stream=True,
             )
             for chunk in stream:

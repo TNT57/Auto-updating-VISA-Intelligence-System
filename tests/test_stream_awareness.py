@@ -90,15 +90,68 @@ class TestContextLabelling:
 
 
 class TestSystemPromptRequiresBreakdown:
-    def test_prompt_instructs_a_per_stream_answer(self):
-        from src.generation.prompt_templates import SYSTEM_PROMPT
+    """
+    Both halves of the stream rule must survive.
 
+    Enumerate-when-different is what stops one stream's fee being presented as
+    everyone's. Collapse-when-same is what stops three identical IELTS blocks.
+    Dropping either one reintroduces a bug we have already shipped, so each is
+    asserted on keywords rather than a quoted sentence — the wording should be
+    free to change, the behaviour should not.
+    """
+
+    @staticmethod
+    def _prompt() -> str:
         # Collapse whitespace: the template uses backslash continuations, so
         # its rendered text carries the next line's indentation mid-sentence.
-        low = " ".join(SYSTEM_PROMPT.split()).lower()
-        assert "do not pick one and present it" in low
+        from src.generation.prompt_templates import SYSTEM_PROMPT
+
+        return " ".join(SYSTEM_PROMPT.split()).lower()
+
+    def test_prompt_names_the_streams(self):
+        low = self._prompt()
         assert "post-higher education work" in low
         assert "post-vocational education work" in low
+
+    def test_prompt_requires_a_breakdown_when_values_differ(self):
+        low = self._prompt()
+        assert "do not pick one" in low
+        assert "differ" in low
+
+    def test_prompt_requires_collapsing_when_values_are_the_same(self):
+        """Guards the fix for three identical IELTS blocks in one answer."""
+        low = self._prompt()
+        assert "same across the streams" in low
+        assert "never repeat an identical value" in low
+
+    def test_prompt_puts_the_answer_before_the_detail(self):
+        low = self._prompt()
+        assert "answer first" in low
+
+
+class TestFollowUpTemplateHonoursNarrowing:
+    """A follow-up that narrows must not re-dump the broad answer."""
+
+    @staticmethod
+    def _template() -> str:
+        from src.generation.prompt_templates import FOLLOW_UP_TEMPLATE
+
+        return " ".join(FOLLOW_UP_TEMPLATE.split()).lower()
+
+    def test_template_instructs_answering_only_the_narrowed_case(self):
+        low = self._template()
+        assert "narrows the question" in low
+        assert "answer only that narrowed case" in low
+
+    def test_template_forbids_restating_the_previous_answer(self):
+        low = self._template()
+        assert "do not restate" in low
+
+    def test_template_still_has_its_placeholders(self):
+        from src.generation.prompt_templates import FOLLOW_UP_TEMPLATE
+
+        for slot in ("{chat_history}", "{context}", "{question}"):
+            assert slot in FOLLOW_UP_TEMPLATE
 
 
 class TestGroundingContextWindow:
@@ -156,3 +209,81 @@ class TestGroundingContextWindow:
 
         assert verdict == "UNKNOWN"
         assert "429" in explanation
+
+
+class TestContextCollapsesDuplicates:
+    """
+    The corpus repeats whole blocks verbatim across stream pages — 91 of 226
+    indexed chunks are exact duplicates, every group spanning different URLs.
+    Sending the model the same paragraph once per stream is what made it
+    answer with one heading per stream.
+    """
+
+    SHARED = (
+        "Acceptable minimum scores: IELTS overall 6.5 with at least 5.5 "
+        "in each component."
+    )
+
+    def _context(self, pairs):
+        from src.retrieval.retriever import QueryResults
+
+        return QueryResults(
+            query="q",
+            results=[_result(src, text) for src, text in pairs],
+            total_found=len(pairs),
+        ).format_for_llm()
+
+    def test_identical_passages_appear_once(self):
+        context = self._context([
+            (f"{BASE}/post-higher-education-work", self.SHARED),
+            (f"{BASE}/post-vocational-education-work", self.SHARED),
+            (f"{BASE}/graduate-work", self.SHARED),
+        ])
+
+        assert context.count(self.SHARED) == 1
+        assert "[2]" not in context, "duplicates were not collapsed"
+
+    def test_collapsed_passage_names_every_stream_it_covers(self):
+        context = self._context([
+            (f"{BASE}/post-higher-education-work", self.SHARED),
+            (f"{BASE}/post-vocational-education-work", self.SHARED),
+        ])
+
+        assert "Streams:" in context
+        assert "Post-Higher Education Work stream" in context
+        assert "Post-Vocational Education Work stream" in context
+
+    def test_whitespace_differences_still_collapse(self):
+        context = self._context([
+            (f"{BASE}/post-higher-education-work", self.SHARED),
+            (f"{BASE}/graduate-work", self.SHARED.replace(" ", "  ") + "\n"),
+        ])
+
+        assert "[2]" not in context
+
+    def test_passages_differing_only_in_the_fee_are_kept_apart(self):
+        """
+        The regression guard on dedup itself.
+
+        These two differ by one number and would score above 0.95 on any
+        similarity ratio. Collapsing them is exactly the bug that stream
+        labelling was added to fix, so exact matching must keep them apart.
+        """
+        context = self._context([
+            (f"{BASE}/post-higher-education-work",
+             "The visa application charge is AUD5,750.00."),
+            (f"{BASE}/second-post-higher-education-work",
+             "The visa application charge is AUD2,265.00."),
+        ])
+
+        assert "AUD5,750.00" in context
+        assert "AUD2,265.00" in context
+        assert "[2]" in context, "two genuinely different passages were merged"
+
+    def test_single_stream_passage_keeps_the_singular_label(self):
+        context = self._context([
+            (f"{BASE}/post-higher-education-work", self.SHARED),
+        ])
+
+        assert "Stream: Post-Higher Education Work stream" in context
+        assert "Streams:" not in context

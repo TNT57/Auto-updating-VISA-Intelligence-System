@@ -171,6 +171,12 @@ prompt = st.chat_input("Ask about the 485 visa...") or st.session_state.pop(
 )
 
 if prompt:
+    # Snapshot the history BEFORE this question joins it. Building it after the
+    # append made st.session_state.messages always non-empty, so the app always
+    # took the follow-up branch — even on the first question — and the history
+    # always ended with the very question being asked, duplicating it.
+    prior_messages = list(st.session_state.messages)
+
     # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -189,10 +195,12 @@ if prompt:
                 # Step 2: Format context for LLM
                 context = results.format_for_llm()
 
-                # Step 3: Build conversation history (Improvement #3)
+                # Step 3: Build conversation history. Empty on the first
+                # question, so that one uses RAG_PROMPT_TEMPLATE rather than
+                # the follow-up template.
                 chat_history = None
-                if st.session_state.messages:
-                    chat_history = _build_chat_history(st.session_state.messages)
+                if prior_messages:
+                    chat_history = _build_chat_history(prior_messages)
 
                 # Step 4: Generate answer using LLM with streaming + memory
                 response_placeholder = st.empty()

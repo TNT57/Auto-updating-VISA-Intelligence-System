@@ -72,19 +72,58 @@ class QueryResults:
     total_found: int
 
     def format_for_llm(self) -> str:
-        """Format results as context text for LLM prompt."""
+        """
+        Format results as context text for the LLM prompt.
+
+        Identical passages are collapsed into one, labelled with every stream
+        they came from. The stream sub-pages repeat whole blocks verbatim —
+        91 of 226 indexed chunks are exact duplicates of another chunk, and
+        every duplicate group spans different source URLs — so a five-chunk
+        retrieval for "the English requirement" handed the model the same
+        paragraph up to five times. Shown a value five times under five stream
+        headings, the model answered with five stream headings.
+
+        The match is exact after whitespace normalisation, never fuzzy. The fee
+        paragraphs for two streams differ only in "AUD5,750.00" vs
+        "AUD2,265.00" and would score above 0.95 on any similarity ratio;
+        merging those is precisely the bug stream labelling was added to fix.
+        Exact match can only fail by leaving a duplicate in. Fuzzy match could
+        fail by merging two different numbers into one confident answer.
+
+        This changes only what the model sees. `get_sources()` is untouched, so
+        the UI still cites every page the answer drew on.
+        """
         if not self.results:
             return "No relevant documents found."
 
+        groups: dict[str, list[RetrievalResult]] = {}
+        for r in self.results:
+            groups.setdefault(" ".join(r.content.split()), []).append(r)
+
         context_parts = []
-        for i, r in enumerate(self.results, 1):
-            source_info = f"Source: {r.source}, Page {r.page_number}"
+        for i, members in enumerate(groups.values(), 1):
+            first = members[0]
+
+            streams: list[str] = []
+            for m in members:
+                if m.stream and m.stream not in streams:
+                    streams.append(m.stream)
+
+            header = []
             # Naming the stream up front is what lets the model answer
             # "AUD5,750 for X, AUD2,265 for Y" instead of picking one.
-            if r.stream:
-                source_info = f"Stream: {r.stream}\n{source_info}"
+            if len(streams) > 1:
+                header.append("Streams: " + "; ".join(streams))
+                header.append(
+                    "(One shared rule covering all of the streams above, "
+                    "not several different ones.)"
+                )
+            elif streams:
+                header.append(f"Stream: {streams[0]}")
+            header.append(f"Source: {first.source}, Page {first.page_number}")
+
             context_parts.append(
-                f"[{i}] {source_info}\n{r.content}"
+                "[{}] {}\n{}".format(i, "\n".join(header), first.content)
             )
 
         return "\n\n---\n\n".join(context_parts)
