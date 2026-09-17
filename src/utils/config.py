@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
 
+    # Model IDs are configurable because providers retire them on their own
+    # schedule. Groq decommissioned llama-3.3-70b-versatile on 2026-08-16,
+    # which silently broke generation everywhere it was hardcoded while
+    # retrieval kept working. Overriding an env var now beats a code change.
+    groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+
     # ---- Embedding Model ----
     embedding_model: str = Field(
         default="all-mpnet-base-v2", alias="EMBEDDING_MODEL"

@@ -15,7 +15,7 @@ produces **correct, relevant, and well-grounded** outputs:
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -709,3 +709,63 @@ class TestEndToEndSemantic:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+# ══════════════════════════════════════════════════════════════════════
+# Model configuration
+# ══════════════════════════════════════════════════════════════════════
+
+class TestModelConfiguration:
+    """
+    Model IDs must come from settings, never a literal.
+
+    Groq decommissioned llama-3.3-70b-versatile on 2026-08-16. It was
+    hardcoded, so generation broke in production while retrieval kept
+    working and nothing in the suite noticed. A retired ID cannot be caught
+    offline, but a hardcoded one can.
+    """
+
+    def test_groq_model_comes_from_settings(self):
+        from src.generation.llm_client import LLMClient
+
+        client = LLMClient.__new__(LLMClient)
+        client.provider = "groq"
+
+        with patch("src.generation.llm_client.settings") as mock_settings:
+            mock_settings.groq_api_key = "k"
+            mock_settings.groq_model = "some/other-model"
+            with patch("groq.Groq"):
+                client._setup_client()
+
+        assert client._model == "some/other-model"
+
+    def test_openai_model_comes_from_settings(self):
+        pytest.importorskip("openai", reason="openai is an optional provider")
+        from src.generation.llm_client import LLMClient
+
+        client = LLMClient.__new__(LLMClient)
+        client.provider = "openai"
+
+        with patch("src.generation.llm_client.settings") as mock_settings:
+            mock_settings.openai_api_key = "k"
+            mock_settings.openai_model = "gpt-test"
+            with patch("openai.OpenAI"):
+                client._setup_client()
+
+        assert client._model == "gpt-test"
+
+    def test_no_model_id_is_hardcoded_in_the_client(self):
+        """Guards against a literal creeping back into _setup_client."""
+        import inspect
+
+        from src.generation import llm_client
+
+        source = inspect.getsource(llm_client.LLMClient._setup_client)
+        for literal in ("llama-", "gpt-4", "gpt-oss", "qwen"):
+            assert literal not in source, (
+                f"Model ID '{literal}...' is hardcoded; use settings instead"
+            )
+
+    def test_default_groq_model_is_not_the_retired_one(self):
+        from src.utils.config import Settings
+
+        assert Settings().groq_model != "llama-3.3-70b-versatile"
