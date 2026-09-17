@@ -445,11 +445,27 @@ class TestPromptQuality:
         assert "external knowledge" in SYSTEM_PROMPT.lower() or \
                "Only use provided context" in SYSTEM_PROMPT
 
-    def test_system_prompt_requires_disclaimer(self):
-        """System prompt should require a legal disclaimer."""
-        from src.generation.prompt_templates import SYSTEM_PROMPT
+    def test_system_prompt_does_not_demand_a_blanket_disclaimer(self):
+        """
+        The disclaimer moved from every answer to the UI.
 
-        assert "disclaimer" in SYSTEM_PROMPT.lower() or "NOT legal advice" in SYSTEM_PROMPT
+        A two-sentence "this is not legal advice" paragraph appended to every
+        single reply was pure bulk, and a reader learns to skip a notice that
+        never changes. The Chat page renders a persistent banner above the
+        conversation instead — see the companion test that it is still there.
+        The guarantee did not go away; it moved somewhere it is always visible
+        rather than repeated.
+        """
+        from src.generation.prompt_templates import (
+            FOLLOW_UP_TEMPLATE,
+            RAG_PROMPT_TEMPLATE,
+            SYSTEM_PROMPT,
+        )
+
+        for template in (SYSTEM_PROMPT, RAG_PROMPT_TEMPLATE, FOLLOW_UP_TEMPLATE):
+            low = " ".join(template.split()).lower()
+            assert "include the disclaimer" not in low
+            assert "always remind users" not in low
 
     def test_system_prompt_forbids_approximation(self):
         """System prompt should instruct precise figures, not guesses."""

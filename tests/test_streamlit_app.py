@@ -109,3 +109,18 @@ def test_alerts_page_shows_the_parked_state():
         str(getattr(el, "value", "")) for el in at.warning
     )
     assert "parked" in body.lower() or "disabled" in body.lower()
+
+
+def test_chat_page_always_shows_the_legal_disclaimer():
+    """
+    Companion to test_system_prompt_does_not_demand_a_blanket_disclaimer.
+
+    The per-answer disclaimer was removed from the prompts because this banner
+    exists. If the banner ever goes, the app would show no disclaimer at all,
+    so this test is what holds that guarantee now.
+    """
+    at = _run("app/pages/1_💬_Chat.py")
+
+    warnings = " ".join(str(getattr(el, "value", "")) for el in at.warning)
+    assert "not legal advice" in warnings.lower()
+    assert "migration agent" in warnings.lower()

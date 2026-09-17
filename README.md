@@ -63,6 +63,18 @@ to use only what it was given. A second call then re-reads the answer against
 those same passages and labels it GROUNDED, PARTIALLY_GROUNDED or UNGROUNDED.
 When the answer isn't in the corpus, it says so rather than inventing one.
 
+Answers lead with the direct answer and put the breakdown below it. Where a
+value is the same across streams it is stated once — "all three streams require
+IELTS 6.5 overall" — and broken down per stream only where the values genuinely
+differ. The legal disclaimer is a permanent banner on the page rather than a
+paragraph appended to every reply.
+
+Answer shape is scored by `scripts/eval_answers.py`, the counterpart to
+`eval_retrieval.py`: length, whether the answer leads with the answer, and
+whether a shared value got repeated once per stream. The per-stream cases carry
+values that differ between streams, so an over-eager collapse fails the eval —
+that is the property protecting against the opposite bug.
+
 ### Query expansion: the fix that mattered most
 
 Applicants and governments use different words for the same thing. Asked two
