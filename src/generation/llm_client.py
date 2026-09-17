@@ -42,13 +42,13 @@ class LLMClient:
         if self.provider == "groq":
             from groq import Groq
             self._client = Groq(api_key=settings.groq_api_key)
-            self._model = "llama-3.3-70b-versatile"
+            self._model = settings.groq_model
             logger.info("LLM client initialized: Groq ({})", self._model)
 
         elif self.provider == "openai":
             from openai import OpenAI
             self._client = OpenAI(api_key=settings.openai_api_key)
-            self._model = "gpt-4o-mini"
+            self._model = settings.openai_model
             logger.info("LLM client initialized: OpenAI ({})", self._model)
 
         else:

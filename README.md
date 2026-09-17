@@ -58,7 +58,7 @@ The interesting part is **query expansion** — see below.
 
 **3. Generation** — `src/generation/`
 
-The top passages go to Llama 3.3 70B (via Groq's free tier) with instructions
+The top passages go to an LLM on Groq's free tier (model set by GROQ_MODEL) with instructions
 to use only what it was given. A second call then re-reads the answer against
 those same passages and labels it GROUNDED, PARTIALLY_GROUNDED or UNGROUNDED.
 When the answer isn't in the corpus, it says so rather than inventing one.
@@ -133,7 +133,7 @@ end-to-end.
             │ top passages                          ▼
             ▼                                  commit + push
   ┌───────────────────┐                             │
-  │ Llama 3.3 70B     │                             ▼
+  │ Groq LLM          │                             ▼
   │ answer + cite     │                    Streamlit redeploys
   └─────────┬─────────┘
             ▼
@@ -151,7 +151,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full technical breakd
 
 | Category | Tools |
 |---|---|
-| **LLM & RAG** | Groq (Llama 3.3 70B), SentenceTransformers (`all-mpnet-base-v2`), langchain-text-splitters |
+| **LLM & RAG** | Groq (model configurable), SentenceTransformers (`all-mpnet-base-v2`), langchain-text-splitters |
 | **Vector DB** | ChromaDB (cosine) |
 | **Scraping** | Scrapling + Playwright Chromium (the site is JS-rendered), BeautifulSoup4 |
 | **Data Processing** | pdfplumber, pypdf, pandas |
