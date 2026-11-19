@@ -1,21 +1,22 @@
 """
 Pluggable HTTP fetch backends for the scraper.
 
-The scraper needs different fetch strategies depending on where it runs:
+immi.homeaffairs.gov.au builds its visa content with JavaScript, so the
+backend that matters is the one that renders it:
 
-  * Locally (residential IP), plain httpx is sufficient — immi.homeaffairs.gov.au
-    serves ordinary HTTP clients fine.
-  * Where the site's WAF is stricter about client fingerprints, Scrapling's
-    `Fetcher` impersonates a real browser at the TLS level, which plain httpx
-    cannot do.
+  * `browser` — Playwright Chromium via Scrapling's `DynamicFetcher`. The only
+    backend that returns the page's real text.
+  * `scrapling` — Scrapling's `Fetcher`, which impersonates a real browser at
+    the TLS level. No JavaScript rendering.
+  * `httpx` — plain HTTP. No JavaScript rendering.
 
-Neither helps when the block is on the *source IP* — a datacenter range such as
-GitHub Actions runners. That needs a fetch originating elsewhere, which is what
-the `BaseFetcher` interface leaves room for: a remote-fetch backend can be added
-without touching the scraper or the pipeline.
+The HTTP backends get a 200 from this site but an almost empty page. New
+strategies plug in behind the `BaseFetcher` interface without touching the
+scraper or the pipeline.
 
-Select a backend with SCRAPER_BACKEND=auto|httpx|scrapling (default: auto,
-which prefers Scrapling when it is installed and falls back to httpx).
+Select a backend with SCRAPER_BACKEND=auto|browser|scrapling|httpx (default:
+auto, which prefers the browser when Chromium is installed, then scrapling,
+then httpx).
 """
 
 from abc import ABC, abstractmethod

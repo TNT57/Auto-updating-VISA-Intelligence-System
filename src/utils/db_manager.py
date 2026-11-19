@@ -257,7 +257,7 @@ class DatabaseManager:
         Keep only the most recent `keep` snapshots for a URL.
 
         Full page text adds up quickly across daily runs; this keeps
-        changes.db small enough to cache between CI runs.
+        changes.db small enough to commit to the repository.
         """
         with self.get_session() as session:
             stale = (

@@ -279,8 +279,11 @@ python scripts/fetch_and_index.py --dry-run       # show what it would fetch
 python scripts/fetch_and_index.py --ask "What is the English requirement?"
 ```
 
-Run it from a machine whose IP the site does not block — a home connection.
-GitHub Actions runners are refused (see Troubleshooting). The crawl is bounded:
+It needs Chromium (`python -m playwright install chromium`) and runs locally or
+on a GitHub Actions runner — the daily workflow calls it when the site has
+changed. If fetches return 403, see
+[Why the scrape failed for four months](#why-the-scrape-failed-for-four-months).
+The crawl is bounded:
 same host only, restricted to the 485 URL prefix, capped by `--max-pages`
 (default 25), and it honours `robots.txt` and `SCRAPING_DELAY`.
 
@@ -298,7 +301,8 @@ files on your C: drive.
 | Python packages | `.venv/` | Virtual environment (gitignored) |
 | HuggingFace models | `.cache/huggingface/` | Embedding models cached here (gitignored) |
 | PyTorch data | `.cache/torch/` | Torch hub cache (gitignored) |
-| ChromaDB vectors | `database/vectorstore/` | Persistent vector DB (gitignored) |
+| ChromaDB vectors | `database/vectorstore/` | Persistent vector DB (committed — ships with the app) |
+| Change history | `database/changes.db` | Page snapshots + changes (committed — the diff baseline) |
 | Raw PDFs / HTML | `data/raw/` | Your documents (gitignored) |
 
 Cache directories are configured in two places so they always point inside the project:

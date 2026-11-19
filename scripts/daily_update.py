@@ -52,8 +52,8 @@ def load_previous_content(url: str, db: DatabaseManager) -> str | None:
     the scheduled GitHub Actions run: the runner is ephemeral, and the HTML
     snapshot directory is gitignored, so a file-based lookup would find
     nothing and every run would re-baseline instead of detecting changes.
-    Keeping snapshots in changes.db means one cached file carries all the
-    state the pipeline needs.
+    Keeping snapshots in changes.db, which is committed to the repository,
+    means one file carries all the state the pipeline needs.
     """
     snapshot = db.get_latest_page_snapshot(url)
     if snapshot is None:
