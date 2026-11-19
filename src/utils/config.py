@@ -62,8 +62,9 @@ class Settings(BaseSettings):
 
     # ---- Scraping Configuration ----
     scraping_delay: int = Field(default=5, alias="SCRAPING_DELAY")
-    # Fetch backend: auto | httpx | scrapling. "auto" prefers scrapling when
-    # installed. See src/scraping/fetchers.py.
+    # Fetch backend: auto | browser | scrapling | httpx. "auto" prefers the
+    # browser (the site is JS-rendered), then scrapling, then httpx. See
+    # src/scraping/fetchers.py.
     scraper_backend: str = Field(default="auto", alias="SCRAPER_BACKEND")
     # The WAF 403s any User-Agent containing "Bot" or "Crawler" — verified by
     # trial on 2026-08-13. The original "Visa485IntelligenceBot/1.0" was the
@@ -151,7 +152,7 @@ class Settings(BaseSettings):
 
     # ---- Change detection ----
     # How many page snapshots to retain per URL before pruning. Full page text
-    # adds up across daily runs and changes.db is cached between CI runs.
+    # adds up across daily runs, and changes.db is committed to the repo.
     snapshot_history: int = Field(default=10, alias="SNAPSHOT_HISTORY")
     # Cap on LLM severity classifications per run. A page-wide rewrite can
     # produce dozens of diff blocks, which would otherwise burn Groq's rate

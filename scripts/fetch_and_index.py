@@ -6,8 +6,9 @@ downloads any linked PDFs, and indexes everything into ChromaDB. This is the
 step that puts *real* content behind the chat — without it the vector store
 only holds whatever PDFs you placed in data/raw/pdfs/ by hand.
 
-Run it from a machine whose IP the site does not block (a home connection —
-GitHub Actions runners are refused; see README).
+Runs locally or on a GitHub Actions runner; the daily workflow calls it when
+the site has changed. Fetching needs Chromium (the site is JS-rendered):
+`python -m playwright install chromium`.
 
     python scripts/fetch_and_index.py                    # configured URLs + their PDFs
     python scripts/fetch_and_index.py --crawl            # also follow in-section links
@@ -231,8 +232,9 @@ def main() -> None:
         print(f"    ! {r['url']} — {r['error']}")
 
     if not ok:
-        print("\nNothing was fetched. If these are 403s, the site is refusing")
-        print("this machine's IP — see the Troubleshooting section of README.md.")
+        print("\nNothing was fetched. If these are 403s, check USER_AGENT — the")
+        print("site's WAF refuses agents containing 'Bot' or 'Crawler'. See")
+        print("'Why the scrape failed for four months' in README.md.")
         sys.exit(1)
 
     for question in args.ask or []:
